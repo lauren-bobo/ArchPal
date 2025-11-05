@@ -1,6 +1,6 @@
 import streamlit as st
 from langchain_anthropic import ChatAnthropic
-from langchain.schema import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 st.title("🤖 Claude Chatbot with System Prompt")
 st.caption("🚀 A Streamlit chatbot powered by Anthropic Claude via LangChain")
