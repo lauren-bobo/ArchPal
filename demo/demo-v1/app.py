@@ -6,6 +6,7 @@ import csv
 import io
 from datetime import datetime
 import dropbox
+import os
 
 # Initialize session state
 if "student_info" not in st.session_state:
@@ -38,18 +39,25 @@ if st.session_state["student_info"] is None:
         first_name = st.text_input("First Name", key="first_name")
         last_name = st.text_input("Last Name", key="last_name")
         session_number = st.text_input("Session Number", key="session_number")
+        session_password = st.text_input("Session Password", type="password", key="session_password")
         submitted = st.form_submit_button("Start Session", use_container_width=True)
-        
+
         if submitted:
-            if first_name and last_name and session_number:
-                unique_id = str(uuid.uuid4())
-                st.session_state["student_info"] = {
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "session_number": session_number,
-                    "unique_id": unique_id
-                }
-                st.rerun()
+            # Get the correct password from secrets
+            correct_password = st.secrets.get("session_password", "")
+
+            if first_name and last_name and session_number and session_password:
+                if session_password == correct_password:
+                    unique_id = str(uuid.uuid4())
+                    st.session_state["student_info"] = {
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "session_number": session_number,
+                        "unique_id": unique_id
+                    }
+                    st.rerun()
+                else:
+                    st.error("❌ Incorrect session password. Please check with your session facilitator.")
             else:
                 st.error("Please fill in all fields.")
     st.stop()
@@ -156,8 +164,30 @@ def show_admin_controls():
     return anthropic_api_key, system_prompt
 
 # Main title
-st.title("🤖 Archpal AI Companion")
-st.caption("🚀 A Streamlit chatbot powered by Anthropic Claude via LangChain")
+col1, col2 = st.columns([1, 4])
+with col1:
+    logo_path = os.path.join(os.path.dirname(__file__), "figs", "logo.png")
+    st.image(logo_path, width=120)
+with col2:
+    st.title("ArchPal AI Writing Companion")
+    st.caption("UGA English Department is developing Archpal: a new AI companion to help you plan, research, brainstorm, and create for any writing project! Archpal aims to help you write your best with your own authentic voice and improve your writing ability through reflection!")
+
+# Sample prompt buttons
+st.markdown("### 💡 Quick Start Prompts")
+
+sample_prompts = [
+    "I'm working on the Genre Exploration capstone project. I need to choose a genre for my future academic or professional work, but I'm not sure where to start researching it. Help me brainstorm ideas and plan out my research.",
+    "For my Genre Exploration project, I need to write a guide for my future self about applying something from class to my chosen genre. How should I plan this 10-page guide? What are some good writing habits that can help me complete it effectively?",
+    " I just finished peer review on my Genre Exploration draft. I have comments everywhere about connecting class concepts to my chosen genre and how I'm not being completely clear in my instructions. What do I do next?"
+]
+
+prompt = None
+
+# Display prompts in long ovals above chat bar
+for i, sample_prompt in enumerate(sample_prompts):
+    if st.button(sample_prompt, key=f"sample_prompt_{i}", use_container_width=True):
+        prompt = sample_prompt.replace("Student: ", "")  # Remove the "Student: " prefix when sending to chat
+    st.markdown("")  # Add spacing between buttons
 
 # Handle admin login overlay
 if st.session_state["show_admin_login"] and not st.session_state["admin_logged_in"]:
@@ -292,31 +322,22 @@ with st.sidebar:
     st.markdown("### Student Information")
     st.text(f"Name: {first_name} {last_name}")
     st.text(f"Session: {session_number}")
-    st.text(f"ID: {unique_id[:8]}...")
+
+    st.divider()
+
+    st.markdown("### 📋 Demo Instructions")
+    st.markdown("1. ***Using ArchPal***: Press one of the sample prompts above to get started, or type and send your own message in the chat input below.")
+    st.markdown("3. **Chat with ArchPal**: Ask questions about your writing project. Provide short sample text when appropriate.")
+    st.markdown("4. **Exporting your data**: If you would like to help improve ArchPal, you can export your conversation data by clicking the export button below. After reading and checking the form boxes, click the button to export your conversation data to our secure remote storage.")
+    st.markdown("5. **Starting a new conversation**: After you have exported your conversation data (if you chose to), you can start a new conversation refreshing the page and begining a new session.")
 
 # Display chat messages
 for message in st.session_state.messages:
     if isinstance(message, HumanMessage):
         st.chat_message("user").write(message.content)
     elif isinstance(message, AIMessage):
-        st.chat_message("assistant").write(message.content)
-
-# Sample prompt buttons
-st.markdown("### 💡 Quick Start Prompts")
-
-sample_prompts = [
-    "Student: I'm working on the Genre Exploration capstone project. I need to choose a genre for my future academic or professional work, but I'm not sure where to start researching it.",
-    "Student: For my Genre Exploration project, I need to write a guide for my future self about applying something from class to my chosen genre. How should I plan this 10-page guide?",
-    "Student: I just finished peer review on my Genre Exploration draft. I have comments everywhere about connecting class concepts to my chosen genre. What do I do next?"
-]
-
-prompt = None
-
-# Display prompts in long ovals above chat bar
-for i, sample_prompt in enumerate(sample_prompts):
-    if st.button(sample_prompt, key=f"sample_prompt_{i}", use_container_width=True):
-        prompt = sample_prompt.replace("Student: ", "")  # Remove the "Student: " prefix when sending to chat
-    st.markdown("")  # Add spacing between buttons
+        icon_path = os.path.join(os.path.dirname(__file__), "figs", "icon.jpg")
+        st.chat_message("assistant", avatar=icon_path).write(message.content)
 
 # Chat input
 if prompt := st.chat_input() or prompt:
@@ -345,7 +366,8 @@ if prompt := st.chat_input() or prompt:
 
     # Get response from Claude
     try:
-        response = chat.invoke(langchain_messages)
+        with st.spinner("ArchPal is thinking..."):
+            response = chat.invoke(langchain_messages)
         ai_message = AIMessage(content=response.content)
         st.session_state.messages.append(ai_message)
 
@@ -358,7 +380,8 @@ if prompt := st.chat_input() or prompt:
             "AIMessageTime": ai_timestamp.strftime("%Y-%m-%d %H:%M:%S")
         })
 
-        st.chat_message("assistant").write(response.content)
+        icon_path = os.path.join(os.path.dirname(__file__), "figs", "icon.jpg")
+        st.chat_message("assistant", avatar=icon_path).write(response.content)
     except Exception as e:
         st.error(f"Error: {str(e)}")
         st.stop()
@@ -388,104 +411,112 @@ if st.session_state["show_export_consent"]:
         st.markdown("### 📋 Export Consent & Privacy Agreement")
         st.markdown("Before exporting your conversation data, please review and confirm the following:")
 
-        with st.form("export_consent_form"):
-            # Checkbox 1: Consent form authorization
-            consent_signed = st.checkbox(
-                "I have signed and authorized the consent form",
-                key="consent_checkbox",
-                value=st.session_state["consent_signed"]
-            )
+        # Checkbox 1: Consent form authorization
+        consent_signed = st.checkbox(
+            "I have signed and authorized the consent form",
+            key="consent_checkbox_modal",
+            value=st.session_state.get("consent_signed", False)
+        )
 
-            # Checkbox 2: Data privacy acknowledgment
-            privacy_acknowledged = st.checkbox(
-                "I understand my conversation data will be temporarily associated with my name in order to match it with the consent form on file. I understand that my data will be anonymized before any further analysis is done for research and improvements.",
-                key="privacy_checkbox",
-                value=st.session_state["data_privacy_acknowledged"]
-            )
+        # Checkbox 2: Data privacy acknowledgment
+        privacy_acknowledged = st.checkbox(
+            "I understand my conversation data will be temporarily associated with my name in order to match it with the consent form on file. I understand that my data will be anonymized before any further analysis is done for research and improvements.",
+            key="privacy_checkbox_modal",
+            value=st.session_state.get("data_privacy_acknowledged", False)
+        )
 
-            st.markdown("---")
+        st.markdown("---")
 
-            # Buttons
-            col1, col2 = st.columns([1, 1])
+        # Export button only enabled when both checkboxes are checked
+        export_enabled = consent_signed and privacy_acknowledged
+        export_button_text = "✅ Proceed with Export" if export_enabled else "✅ Proceed with Export (Check boxes above to enable)"
 
-            with col1:
-                cancel_submitted = st.form_submit_button(
-                    "❌ Cancel",
-                    use_container_width=True,
-                    type="secondary"
-                )
+        col1, col2 = st.columns([1, 1])
 
-            with col2:
-                continue_submitted = st.form_submit_button(
-                    "✅ Continue Export",
-                    use_container_width=True,
-                    type="primary"
-                )
-
-            # Handle form submissions
-            if cancel_submitted:
+        with col1:
+            if st.button("❌ Cancel", use_container_width=True, type="secondary"):
                 st.session_state["show_export_consent"] = False
                 st.session_state["consent_signed"] = False
                 st.session_state["data_privacy_acknowledged"] = False
                 st.rerun()
 
-            if continue_submitted:
-                # Close modal and reset state
+        with col2:
+            if st.button(export_button_text, use_container_width=True, type="primary", disabled=not export_enabled):
+                # Update session state with checkbox values
+                st.session_state["consent_signed"] = consent_signed
+                st.session_state["data_privacy_acknowledged"] = privacy_acknowledged
+
+                # Close modal and show loading
                 st.session_state["show_export_consent"] = False
+
+                # Show loading spinner during export
+                with st.spinner("📤 Exporting your conversation data..."):
+                    # Format conversation as dataframe-style CSV
+                    output = io.StringIO()
+                    writer = csv.writer(output)
+
+                    # Write header row
+                    writer.writerow([
+                        "Unique Identifier",
+                        "userMessage",
+                        "userMessageTime",
+                        "AIMessage",
+                        "AIMessageTime"
+                    ])
+
+                    # Write conversation rows
+                    for entry in st.session_state.message_log:
+                        writer.writerow([
+                            unique_id,
+                            entry["userMessage"],
+                            entry["userMessageTime"],
+                            entry["AIMessage"],
+                            entry["AIMessageTime"]
+                        ])
+
+                    csv_string = output.getvalue()
+                    output.close()
+
+                    # Create filename for Dropbox upload
+                    filename = f"{last_name}_{first_name}_Session{session_number}.csv"
+
+                    # Upload to Dropbox
+                    export_success = False
+                    try:
+                        # Get Dropbox access token from secrets
+                        dropbox_token = st.secrets["dropbox_access_token"]
+
+                        # Initialize Dropbox client
+                        dbx = dropbox.Dropbox(dropbox_token)
+
+                        # Get folder path from secrets (optional - defaults to root)
+                        folder_path = st.secrets.get('dropbox_folder_path', '')
+
+                        # Construct full path
+                        if folder_path and not folder_path.startswith('/'):
+                            folder_path = '/' + folder_path
+                        if folder_path and not folder_path.endswith('/'):
+                            folder_path = folder_path + '/'
+                        full_path = f"{folder_path}{filename}"
+
+                        # Upload CSV to Dropbox
+                        csv_bytes = csv_string.encode('utf-8')
+                        dbx.files_upload(csv_bytes, full_path, mode=dropbox.files.WriteMode.overwrite)
+
+                        export_success = True
+
+                    except Exception as e:
+                        export_success = False
+
+                # Show result message
+                if export_success:
+                    st.success("🎉 Your conversations have been submitted. Thank you for helping improve ArchPal!")
+                    st.balloons()  # Add celebratory balloons
+                else:
+                    st.error("❌ Export failed. Please try again or contact support.")
+
+                # Reset checkbox states after export attempt
                 st.session_state["consent_signed"] = False
                 st.session_state["data_privacy_acknowledged"] = False
 
-                # Format conversation as dataframe-style CSV
-                output = io.StringIO()
-                writer = csv.writer(output)
-
-                # Write header row
-                writer.writerow([
-                    "Unique Identifier",
-                    "userMessage",
-                    "userMessageTime",
-                    "AIMessage",
-                    "AIMessageTime"
-                ])
-
-                # Write conversation rows
-                for entry in st.session_state.message_log:
-                    writer.writerow([
-                        unique_id,
-                        entry["userMessage"],
-                        entry["userMessageTime"],
-                        entry["AIMessage"],
-                        entry["AIMessageTime"]
-                    ])
-
-                csv_string = output.getvalue()
-                output.close()
-
-                # Create filename for Dropbox upload
-                filename = f"{last_name}_{first_name}_Session{session_number}.csv"
-
-                # Automatically upload to Dropbox (no UI feedback)
-                try:
-                    # Get Dropbox access token from secrets
-                    dropbox_token = st.secrets["dropbox_access_token"]
-
-                    # Initialize Dropbox client
-                    dbx = dropbox.Dropbox(dropbox_token)
-
-                    # Get folder path from secrets (optional - defaults to root)
-                    folder_path = st.secrets.get('dropbox_folder_path', '')
-
-                    # Construct full path
-                    if folder_path and not folder_path.startswith('/'):
-                        folder_path = '/' + folder_path
-                    if folder_path and not folder_path.endswith('/'):
-                        folder_path = folder_path + '/'
-                    full_path = f"{folder_path}{filename}"
-
-                    # Upload CSV to Dropbox
-                    csv_bytes = csv_string.encode('utf-8')
-                    dbx.files_upload(csv_bytes, full_path, mode=dropbox.files.WriteMode.overwrite)
-
-                except Exception as e:
-                    # Log error but don't show to user - upload happens silently
-                    pass
+                st.rerun()
