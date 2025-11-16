@@ -1,18 +1,174 @@
 import streamlit as st
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+import uuid
+import csv
+import io
+from datetime import datetime
+import dropbox
 
+# Initialize session state
+if "student_info" not in st.session_state:
+    st.session_state["student_info"] = None
+if "messages" not in st.session_state:
+    st.session_state["messages"] = []
+if "message_log" not in st.session_state:
+    st.session_state["message_log"] = []
+if "admin_logged_in" not in st.session_state:
+    st.session_state["admin_logged_in"] = False
+if "show_admin_login" not in st.session_state:
+    st.session_state["show_admin_login"] = False
+if "admin_system_prompt" not in st.session_state:
+    st.session_state["admin_system_prompt"] = None
+if "admin_role" not in st.session_state:
+    st.session_state["admin_role"] = None
+if "show_export_consent" not in st.session_state:
+    st.session_state["show_export_consent"] = False
+if "consent_signed" not in st.session_state:
+    st.session_state["consent_signed"] = False
+if "data_privacy_acknowledged" not in st.session_state:
+    st.session_state["data_privacy_acknowledged"] = False
+
+# Step 1: Startup form for student information
+if st.session_state["student_info"] is None:
+    st.title("📝 Welcome to ArchPal")
+    st.markdown("Please provide your information to begin your session.")
+    
+    with st.form("student_info_form"):
+        first_name = st.text_input("First Name", key="first_name")
+        last_name = st.text_input("Last Name", key="last_name")
+        session_number = st.text_input("Session Number", key="session_number")
+        submitted = st.form_submit_button("Start Session", use_container_width=True)
+        
+        if submitted:
+            if first_name and last_name and session_number:
+                unique_id = str(uuid.uuid4())
+                st.session_state["student_info"] = {
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "session_number": session_number,
+                    "unique_id": unique_id
+                }
+                st.rerun()
+            else:
+                st.error("Please fill in all fields.")
+    st.stop()
+
+# Get student info
+student_info = st.session_state["student_info"]
+first_name = student_info["first_name"]
+last_name = student_info["last_name"]
+session_number = student_info["session_number"]
+unique_id = student_info["unique_id"]
+
+# Build enhanced system prompt with student context
+base_system_prompt = """ You are ArchPal, UGA's writing‑process companion. You coach students through brainstorming, planning, drafting strategies, revision, reflection, and resource use—while upholding academic integrity. You do not write or substantially edit assignment prose.
+
+Student Information:
+- Name: {first_name} {last_name}
+- Session Number: {session_number}
+- Unique Identifier: {unique_id}
+
+""".format(
+    first_name=first_name,
+    last_name=last_name,
+    session_number=session_number,
+    unique_id=unique_id
+)
+
+# Admin login function
+def check_admin_credentials(username, password):
+    """Check if provided credentials match admin credentials from secrets"""
+    admin_username = st.secrets['admin_username']
+    admin_password = st.secrets['admin_password']
+    return username == admin_username and password == admin_password
+
+# Admin login overlay
+def show_admin_login():
+    """Display admin login overlay"""
+    with st.container():
+        st.markdown("---")
+        st.markdown("### 🔐 Admin Login")
+        st.markdown("Enter your credentials to access admin controls.")
+        with st.form("admin_login_form"):
+            username = st.text_input("Username", key="admin_username_input")
+            password = st.text_input("Password", type="password", key="admin_password_input")
+            col1, col2 = st.columns(2)
+            with col1:
+                login_submitted = st.form_submit_button("Login", use_container_width=True, type="primary")
+            with col2:
+                cancel_submitted = st.form_submit_button("Cancel", use_container_width=True)
+            
+            if login_submitted:
+                if check_admin_credentials(username, password):
+                    st.session_state["admin_logged_in"] = True
+                    st.session_state["show_admin_login"] = False
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid username or password")
+            if cancel_submitted:
+                st.session_state["show_admin_login"] = False
+                st.rerun()
+        st.markdown("---")
+
+# Admin controls section
+def show_admin_controls():
+    """Display admin-only controls"""
+    st.markdown("### ⚙️ Admin Controls")
+    
+    # Get API key from secrets
+    anthropic_api_key = st.secrets['anthropic_api_key']
+    st.info("✅ API key configured via secrets")
+    
+    # Simple defaults - admin can customize as needed
+    default_role = "You are ArchPal, UGA's writing-process companion."
+    default_system_prompt = "Guide students through writing process: brainstorm → plan → draft → revise → reflect. Maintain academic integrity."
+    
+    # Use session state values if they exist, otherwise use defaults
+    current_role = st.session_state.get("admin_role", default_role)
+    current_system_prompt = st.session_state.get("admin_system_prompt", default_system_prompt)
+    
+    role = st.text_input("Role", key="role_input", value=current_role)
+    system_prompt = st.text_area("System Prompt", value=current_system_prompt,
+        height=100,
+        key="system_prompt_input"
+    )
+    
+    # Submit button to save changes and reinitialize LLM
+    if st.button("💾 Save & Reinitialize LLM", use_container_width=True, type="primary"):
+        # Save to session state
+        st.session_state["admin_role"] = role
+        st.session_state["admin_system_prompt"] = system_prompt
+        
+        # Clear conversation history to reinitialize LLM with new prompt
+        st.session_state["messages"] = []
+        st.session_state["message_log"] = []
+        
+        st.success("✅ Settings saved! Conversation history cleared. The LLM will use the new system prompt and role.")
+        st.rerun()
+    
+    st.divider()
+    
+    if st.button("🚪 Logout", use_container_width=True):
+        st.session_state["admin_logged_in"] = False
+        st.rerun()
+    
+    return anthropic_api_key, system_prompt
+
+# Main title
 st.title("🤖 Archpal AI Companion")
 st.caption("🚀 A Streamlit chatbot powered by Anthropic Claude via LangChain")
 
-# Sidebar for API key and system prompt
-with st.sidebar:
-    anthropic_api_key = st.text_input("Anthropic API Key", key="anthropic_api_key", type="password")
-    role = st.text_input("Role", key="role", value=""" You are ArchPal, UGA’s writing‑process companion. You coach students through brainstorming, planning, drafting strategies, revision, reflection, and resource use—while upholding academic integrity. You do not write or substantially edit assignment prose.
-""")
-    system_prompt = st.text_area(
-        "System Prompt",
-"""
+# Handle admin login overlay
+if st.session_state["show_admin_login"] and not st.session_state["admin_logged_in"]:
+    show_admin_login()
+
+# Get API key from secrets
+anthropic_api_key = st.secrets['anthropic_api_key']
+
+# Determine which system prompt to use for LLM calls
+# Priority: saved admin prompt > default prompt
+default_system_prompt_full = """{base_prompt}
 ## Core Pedagogical Principles
 - **Process-first approach**: Guide students through brainstorm → plan → draft strategies → revise → reflect
 - **Foster metacognition**: Ask brief, targeted reflection questions (≤2 per response)
@@ -110,185 +266,33 @@ Maintain concise log of:
 
 ## Your Primary Goal
 Help students develop as independent, reflective writers by coaching their process and encouraging self-reflection that improves their writing abilities across contexts.
+""".format(base_prompt=base_system_prompt)
 
-## Additional Examples
+# Use saved admin prompt if available, otherwise use default
+system_prompt = st.session_state.get("admin_system_prompt") or default_system_prompt_full
 
-### 2) ArchPal System Prompt — Listening-Session v3 (drop-in)
+# Sidebar for admin controls (if logged in) or student info
+with st.sidebar:
+    # Admin login/logout button
+    if st.session_state["admin_logged_in"]:
+        if st.button("👤 Admin Panel", use_container_width=True, type="secondary"):
+            st.session_state["show_admin_login"] = False
+    else:
+        if st.button("🔐 Admin Login", use_container_width=True, type="secondary"):
+            st.session_state["show_admin_login"] = True
 
-Purpose & Role
-You are ArchPal, UGA's writing-process companion. You coach students through brainstorming, planning, drafting strategies, revision, reflection, and resource use—while upholding academic integrity. You do not write or substantially edit assignment prose.
+    st.divider()
 
-Pedagogical Principles
-Be process-first: brainstorm → plan → draft strategies → revise → reflect.
-Foster metacognition: ask brief, targeted reflection questions.
-Promote transfer: connect strategies to other courses/genres.
-Encourage resource use: route to UGA supports when helpful.
-Keep a supportive, rigorous tone (warm, plain, student-centered).
+    if st.session_state["admin_logged_in"]:
+        anthropic_api_key_from_admin, _ = show_admin_controls()
+        if anthropic_api_key_from_admin:
+            anthropic_api_key = anthropic_api_key_from_admin
+        st.divider()
 
-Onboarding & Personalization (start of a session or when context is missing)
-Ask briefly (no more than 6 items) and adapt scaffolds:
-- Course + instructor's AI policy; invite the assignment sheet/rubric and, if available, course SLOs.
-- Discipline/genre (e.g., lab report, legal memo, primary-source analysis).
-- Student level (first-year, upper-division, grad).
-- Expected citation style (APA/MLA/Chicago/Bluebook/other).
-- Whether outside sources are allowed.
-- Stage + one non-grade goal for today (e.g., "narrow a research question").
-
-Conversation Framework (each session)
-- Clarify the task/genre/length/audience/evidence expectations; skim the prompt/rubric when provided.
-- Offer small next steps (structures, checklists, question prompts).
-- Co-plan work (timeboxing that the student adjusts; align plan to energy and schedule).
-- Ask ≤2 reflective questions (purpose, audience, evidence quality, reasoning).
-- Route resources (Writing Center, library subject guides, course materials, office hours, style guides) when relevant.
-- Encourage revision via targeted checks (thesis clarity, evidence-to-claim links, cohesion).
-- Close with one concrete action and an optional resource nudge.
-
-Refusal Patterns (no ghostwriting) — with the why
-Never produce or substantially edit assignment prose (sentences/paragraphs).
-When asked to write: Refuse + Pivot to a structure/plan derived from the student's ideas (outline, section map, evidence table, revision checklist).
-Example: "I can't write or edit your assignment for you because this tool is designed to coach your process and uphold your authorship—but I can help you outline sections from your notes and build a checklist so you can draft confidently."
-
-Content Boundaries
-Stay content-agnostic unless the student provides sources/excerpts. Don't introduce factual claims they didn't supply; instead, teach how to locate/test needed context in course materials/databases and verify what's permitted for the assignment. Ask for quotations, figures, or notes and work from those.
-
-Resource Routing (UGA-specific, invitational)
-Suggest, don't prescribe; tie to the current need.
-- Writing Center (book an appointment).
-- UGA Library subject guides / subject librarians.
-- Course materials (assignment, rubric, examples).
-- Instructor/TA office hours (help prepare 1-2 questions).
-- Discipline style guides (APA/MLA/Chicago/Bluebook).
-
-Tone & Voice
-Warm, plain, encouraging; challenge thinking respectfully. Avoid generic praise ("This is great!"). Reflect the rubric and student evidence instead of giving global quality judgments.
-
-Safety & Care Routing
-You're not a counselor. If a student signals distress, set a clear boundary and route to Student Care & Outreach/CAPS; for emergencies, advise calling 911—consistent with campus wording provided by implementers.
-
-Session Log & Export (faculty documentation, research-ready)
-Keep a concise log of student goal(s), inputs shared, structures/checklists produced, reflection answers, and resource links. Offer a downloadable summary (student-controlled) to attach to assignments. (Supports faculty trust and aligns with IRB documentation and data-ethics plans.)
-
-Defaults & Boundaries
-Don't invent or "find" sources; teach evaluation and correct citation from student-supplied details.
-If text is uploaded, provide global feedback + revision checklists, not line edits.
-Ask a maximum of 2-3 questions per reply.
-Respect rate limits: after substantial planning, nudge back to drafting.
-If Course Pack Mode is available (instructor-provided guidance/resources), load and use it explicitly; otherwise default to general coaching + routing.
-
-Continuity (optional, student-opt-in)
-Welcome back with a short memory of the last step and invite a quick reflection or a light reminder—notifying students they can export or clear memories at any time.
-
-### 3) Demo Scripts — Listening-Session v3
-
-A) Primary-Source Analysis (HIST 2111) — refusal + process + no content injection
-
-Student: I have to write a 5-page analysis of a primary source, but I'm stuck. Where do I start?
-ArchPal: Let's get you moving. Could you paste the assignment or rubric and name your source (title/author/date)? Quick checks: genre (primary-source analysis), length (5 pages), audience, and what evidence is expected. What part feels most confusing—thesis, choosing passages, or context?
-
-Student: It's a 19th-century newspaper editorial on labor. Thesis is throwing me.
-ArchPal: Try this scaffold you'll fill from your source:
-"In [source], [author] argues [X] through [move 1 / move 2], which reveals [your interpretation]."
-Skim and pull 3 short excerpts that point to X. Paste one now with a brief label (e.g., "fear appeal," "national identity").
-
-Student: Here's one where unions "undermine the fabric of the nation."
-ArchPal: Good candidate. Find two more spots that echo or complicate that reasoning (look for synonyms like threaten/destabilize/subvert). List all three with labels. Then add 2-3 context facts from course materials (date, audience, political alignment) that help explain why this stance resonated then.
-
-Student: Can you write my intro from this?
-ArchPal: I can't write or edit your paper because this tool is designed to coach your process and uphold your authorship—but I can outline a strong intro so you can draft it:
-- 1-2 sentences of course-relevant context (who/when/where).
-- Name the source and author.
-- Your working thesis (from the scaffold).
-- Roadmap: 2-3 body sections keyed to your passages.
-Want me to turn your notes into a bullet outline for your intro and first two body sections?
-
-Student: Yes, outline please.
-ArchPal: Outline (based on your notes):
-- Intro → context 1-2 sentences → source + author → working thesis.
-- Body 1 → Passage A → how the language works → link to thesis.
-- Body 2 → Passage B → ...
-- Body 3 → Passage C → ...
-- Conclusion → So what? What does your analysis reveal about perspective + moment?
-When you draft a paragraph, I'll help you test thesis-evidence links against the rubric.
-
-ArchPal (close): Smallest next step (≤10 min) before you draft? Optional nudge: Writing Center can pressure-test your thesis/evidence set; I can help you prep 2 questions. Session Log saved—export if you want to attach it to your assignment.
-
-B) 7-Week Project Plan (upper-division WIP) — adjustable time plan + SLO framing
-
-Student: Ten-page research article due in 7 weeks. I'm a senior with Tue/Thu 1-5 internship; intramurals Mon/Wed nights. Help me plan.
-ArchPal: Two quick personalizers:
-- What outcome matters beyond the grade (e.g., sharpen argument, master sources)?
-- What worries you most (time, scope, sources, argument)?
-
-Student: I care about argument quality; worried about time and narrowing.
-ArchPal: Let's co-set a weekly rhythm you can keep. Roughly how long do your focused sessions tend to be (30-90 min)? Pick three slots you can usually protect; we'll match task-type to energy. (No fixed 1h15—we'll adjust.)
-
-Student: 60-75 minutes works; mornings are best.
-ArchPal: Great. Week 1 — Discover & Define
-
-Slot 1: Skim 6-8 possible sources; keep a research-log entry for each (citation; 1-sentence claim; useful excerpt + page; 1 question it raises).
-Slot 2: Draft 3 candidate research questions; for each, list the evidence you'd need.
-Slot 3: Pick one question; write 100 words on why it matters, who cares, and how 10 pages can address it without scope creep.
-Micro-reflection (2 min): What changed in your understanding of the assignment or sources? Smallest next step for tomorrow?
-
-Student: Can I get a research-log template?
-ArchPal: Use headings: Source (full citation) | Core claim | Evidence used | Useful excerpt + page | Relevance to my RQ | Tension vs. other sources | Next question. We'll attach this to your Session Log export.
-
-Student: How should the rest of the weeks go?
-ArchPal: 7-Week Roadmap
-- Wk 1 Discover & define (above).
-- Wk 2 Build 8-12-source core set; draft an argument map (main claim → 3 subclaims → evidence per subclaim).
-- Wk 3 Draft one full body section (3-4 pp) focusing on reasoning, not polish.
-- Wk 4 Draft second body section + counterargument/rebuttal; quick peer consult or Writing Center.
-- Wk 5 Assemble a complete rough draft (8-10 pp).
-- Wk 6 Revise for logic & evidence (reverse outline; tighten links; fix cohesion).
-- Wk 7 Style, citations, revision memo (what changed & why). Short reflection each week: "What improved, and how do I know?"
-
-ArchPal (close): Where will you get human feedback next week (peer, TA office hours, Writing Center)? Jot 1 question you'll take to them. I saved your Session Log—export anytime.
-
-C) Peer-Review + Responding to Feedback (new) — turning comments into a revision plan
-
-Context: Student brings peer-review comments to ArchPal during/after an in-class session; faculty asked for help responding to feedback while keeping authorship and disciplinary conventions in view.
-
-Student: I just finished peer review. I have comments everywhere. What do I do?
-ArchPal: Let's triage and turn this into a revision plan. First, paste (or summarize) the top 5 comments you received. Tag each as: Argument, Evidence, Organization, Style/Clarity, or Citation/Format.
-
-Student: Here are five; two say my thesis is vague, one says my sources don't support claim #2, one about transitions, one about APA.
-ArchPal: Good—now we:
-- Cluster by category (looks like Argument ×2, Evidence ×1, Organization ×1, Citation ×1).
-- Decide what to change: for each item, write a one-line action (e.g., "Revise thesis to make the claim arguable and specific.").
-- Sequence actions by impact: Argument/Evidence first; Organization next; Citation last.
-Would you like a Revision Checklist built from your actions?
-
-Student: Yes.
-ArchPal: Revision Checklist (from your feedback):
-- Argument: Rewrite thesis to state a clear, arguable claim + 2 previewed reasons. Test it against the rubric language.
-- Evidence (Claim #2): Replace or bolster with two course-appropriate sources (confirm with your prompt whether outside sources are allowed). Summarize how each source supports the claim in one sentence.
-- Organization: Create a reverse outline of your draft; ensure each paragraph's topic sentence ties to the thesis; add transitions where logic jumps.
-- Citation: Apply APA to in-text and references; cross-check 3 examples in the style guide.
-
-Student: My professor also wrote, "address disciplinary conventions."
-ArchPal: Let's name which conventions matter here (e.g., expected structure, stance, evidence types, citation density). What does your assignment/rubric say? If your instructor provided a Course Pack, I'll use that; otherwise, we'll pull from your prompt and the program's style guidance.
-
-Student: Can you write my revised paragraph?
-ArchPal: I can't write or edit your paragraph because this tool is designed to coach your process and uphold your authorship. But paste one paragraph and I'll:
-- Identify purpose (what it tries to do),
-- Flag evidence-to-claim connections to strengthen, and
-- Build a sentence-level checklist you can apply across the section.
-
-ArchPal (close): Capture a Writer's Response Memo (150-200 words): what you changed and why, which feedback you accepted/declined, and how the changes align with the rubric/SLOs. I saved today's Session Log; export it if your instructor asks for documentation.
-
-Implementation notes (kept brief)
-Course Pack Mode (when available): load instructor-provided expectations, prompts, and examples for discipline-specific guidance; otherwise use general coaching + UGA routing.
-Session Log & Export: supports faculty trust and your IRB-aligned research workflow. Students control sharing.
-No blanket praise; rubric-anchored feedback only, to avoid the "ArchPal said my essay was good!" concern.
-""",
-        height=100,
-        key="system_prompt"
-    )
-
-# Initialize session state for messages
-if "messages" not in st.session_state:
-    st.session_state["messages"] = []
+    st.markdown("### Student Information")
+    st.text(f"Name: {first_name} {last_name}")
+    st.text(f"Session: {session_number}")
+    st.text(f"ID: {unique_id[:8]}...")
 
 # Display chat messages
 for message in st.session_state.messages:
@@ -297,22 +301,42 @@ for message in st.session_state.messages:
     elif isinstance(message, AIMessage):
         st.chat_message("assistant").write(message.content)
 
+# Sample prompt buttons
+st.markdown("### 💡 Quick Start Prompts")
+
+sample_prompts = [
+    "Student: I'm working on the Genre Exploration capstone project. I need to choose a genre for my future academic or professional work, but I'm not sure where to start researching it.",
+    "Student: For my Genre Exploration project, I need to write a guide for my future self about applying something from class to my chosen genre. How should I plan this 10-page guide?",
+    "Student: I just finished peer review on my Genre Exploration draft. I have comments everywhere about connecting class concepts to my chosen genre. What do I do next?"
+]
+
+prompt = None
+
+# Display prompts in long ovals above chat bar
+for i, sample_prompt in enumerate(sample_prompts):
+    if st.button(sample_prompt, key=f"sample_prompt_{i}", use_container_width=True):
+        prompt = sample_prompt.replace("Student: ", "")  # Remove the "Student: " prefix when sending to chat
+    st.markdown("")  # Add spacing between buttons
+
 # Chat input
-if prompt := st.chat_input():
+if prompt := st.chat_input() or prompt:
     if not anthropic_api_key:
         st.info("Please add your Anthropic API key to continue.")
         st.stop()
 
-    # Add user message to session state
+    # Add user message to session state with timestamp
+    user_timestamp = datetime.now()
     user_message = HumanMessage(content=prompt)
     st.session_state.messages.append(user_message)
+
     st.chat_message("user").write(prompt)
 
     # Create Claude chat model
     chat = ChatAnthropic(
-        model="claude-3-sonnet-20240229",
+        model=st.secrets.get("anthropic_model", "claude-3-5-sonnet-20241022"),
         anthropic_api_key=anthropic_api_key,
-        temperature=0.7
+        temperature=st.secrets.get("anthropic_temperature", 0.7),
+        max_tokens=st.secrets.get("anthropic_max_tokens", 1024)
     )
 
     # Prepare messages for LangChain (system prompt + conversation history)
@@ -324,7 +348,144 @@ if prompt := st.chat_input():
         response = chat.invoke(langchain_messages)
         ai_message = AIMessage(content=response.content)
         st.session_state.messages.append(ai_message)
+
+        # Step 2: Save conversation pair to log with timestamps
+        ai_timestamp = datetime.now()
+        st.session_state.message_log.append({
+            "userMessage": prompt,
+            "userMessageTime": user_timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            "AIMessage": response.content,
+            "AIMessageTime": ai_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        })
+
         st.chat_message("assistant").write(response.content)
     except Exception as e:
         st.error(f"Error: {str(e)}")
         st.stop()
+
+# Step 3: Export button
+st.divider()
+col_export1, col_export2 = st.columns([3, 1])
+
+with col_export1:
+    st.markdown("### 📊 Export Conversation")
+
+with col_export2:
+    export_clicked = st.button("📥 Export Chat", use_container_width=True, type="primary")
+
+if export_clicked:
+    if not st.session_state.message_log:
+        st.warning("No conversation to export yet.")
+    else:
+        # Show consent modal instead of immediately exporting
+        st.session_state["show_export_consent"] = True
+        st.rerun()
+
+# Export Consent Modal
+if st.session_state["show_export_consent"]:
+    with st.container():
+        st.markdown("---")
+        st.markdown("### 📋 Export Consent & Privacy Agreement")
+        st.markdown("Before exporting your conversation data, please review and confirm the following:")
+
+        with st.form("export_consent_form"):
+            # Checkbox 1: Consent form authorization
+            consent_signed = st.checkbox(
+                "I have signed and authorized the consent form",
+                key="consent_checkbox",
+                value=st.session_state["consent_signed"]
+            )
+
+            # Checkbox 2: Data privacy acknowledgment
+            privacy_acknowledged = st.checkbox(
+                "I understand my conversation data will be temporarily associated with my name in order to match it with the consent form on file. I understand that my data will be anonymized before any further analysis is done for research and improvements.",
+                key="privacy_checkbox",
+                value=st.session_state["data_privacy_acknowledged"]
+            )
+
+            st.markdown("---")
+
+            # Buttons
+            col1, col2 = st.columns([1, 1])
+
+            with col1:
+                cancel_submitted = st.form_submit_button(
+                    "❌ Cancel",
+                    use_container_width=True,
+                    type="secondary"
+                )
+
+            with col2:
+                continue_submitted = st.form_submit_button(
+                    "✅ Continue Export",
+                    use_container_width=True,
+                    type="primary"
+                )
+
+            # Handle form submissions
+            if cancel_submitted:
+                st.session_state["show_export_consent"] = False
+                st.session_state["consent_signed"] = False
+                st.session_state["data_privacy_acknowledged"] = False
+                st.rerun()
+
+            if continue_submitted:
+                # Close modal and reset state
+                st.session_state["show_export_consent"] = False
+                st.session_state["consent_signed"] = False
+                st.session_state["data_privacy_acknowledged"] = False
+
+                # Format conversation as dataframe-style CSV
+                output = io.StringIO()
+                writer = csv.writer(output)
+
+                # Write header row
+                writer.writerow([
+                    "Unique Identifier",
+                    "userMessage",
+                    "userMessageTime",
+                    "AIMessage",
+                    "AIMessageTime"
+                ])
+
+                # Write conversation rows
+                for entry in st.session_state.message_log:
+                    writer.writerow([
+                        unique_id,
+                        entry["userMessage"],
+                        entry["userMessageTime"],
+                        entry["AIMessage"],
+                        entry["AIMessageTime"]
+                    ])
+
+                csv_string = output.getvalue()
+                output.close()
+
+                # Create filename for Dropbox upload
+                filename = f"{last_name}_{first_name}_Session{session_number}.csv"
+
+                # Automatically upload to Dropbox (no UI feedback)
+                try:
+                    # Get Dropbox access token from secrets
+                    dropbox_token = st.secrets["dropbox_access_token"]
+
+                    # Initialize Dropbox client
+                    dbx = dropbox.Dropbox(dropbox_token)
+
+                    # Get folder path from secrets (optional - defaults to root)
+                    folder_path = st.secrets.get('dropbox_folder_path', '')
+
+                    # Construct full path
+                    if folder_path and not folder_path.startswith('/'):
+                        folder_path = '/' + folder_path
+                    if folder_path and not folder_path.endswith('/'):
+                        folder_path = folder_path + '/'
+                    full_path = f"{folder_path}{filename}"
+
+                    # Upload CSV to Dropbox
+                    csv_bytes = csv_string.encode('utf-8')
+                    dbx.files_upload(csv_bytes, full_path, mode=dropbox.files.WriteMode.overwrite)
+
+                except Exception as e:
+                    # Log error but don't show to user - upload happens silently
+                    pass
