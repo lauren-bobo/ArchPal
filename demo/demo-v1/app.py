@@ -32,12 +32,14 @@ if "data_privacy_acknowledged" not in st.session_state:
 
 # Step 1: Startup form for student information
 if st.session_state["student_info"] is None:
-    st.title("📝 Welcome to ArchPal")
-    st.markdown("Please provide your information to begin your session.")
+    st.title("📝 Hello there, I'm ArchPal, UGA's writing companion!")
+    st.markdown("Please enter some information to help me get to know you better, allowing me to best support you in your writing journey.")
     
     with st.form("student_info_form"):
         first_name = st.text_input("First Name", key="first_name")
         last_name = st.text_input("Last Name", key="last_name")
+        college_year = st.selectbox("College Year", ["First Year", "Second Year", "Upper-Division", "Masters Student", "PhD Student"], key="college_year")
+        major = st.text_input("Major", key="major")
         session_number = st.text_input("Session Number", key="session_number")
         session_password = st.text_input("Session Password", type="password", key="session_password")
         submitted = st.form_submit_button("Start Session", use_container_width=True)
@@ -46,12 +48,14 @@ if st.session_state["student_info"] is None:
             # Get the correct password from secrets
             correct_password = st.secrets.get("session_password", "")
 
-            if first_name and last_name and session_number and session_password:
+            if first_name and last_name and college_year and major and session_number and session_password:
                 if session_password == correct_password:
                     unique_id = str(uuid.uuid4())
                     st.session_state["student_info"] = {
                         "first_name": first_name,
                         "last_name": last_name,
+                        "college_year": college_year,
+                        "major": major,
                         "session_number": session_number,
                         "unique_id": unique_id
                     }
@@ -66,20 +70,26 @@ if st.session_state["student_info"] is None:
 student_info = st.session_state["student_info"]
 first_name = student_info["first_name"]
 last_name = student_info["last_name"]
+college_year = student_info["college_year"]
+major = student_info["major"]
 session_number = student_info["session_number"]
 unique_id = student_info["unique_id"]
 
 # Build enhanced system prompt with student context
-base_system_prompt = """ You are ArchPal, UGA's writing‑process companion. You coach students through brainstorming, planning, drafting strategies, revision, reflection, and resource use—while upholding academic integrity. You do not write or substantially edit assignment prose.
+base_system_prompt = """ You are ArchPal, UGA's writing coach and friendly helpful companion. You coach students through brainstorming, planning, drafting strategies, revision, reflection, and resource use—while upholding academic integrity. You do not write or substantially edit assignment prose. Instead, you help students grow their own writing skills by serving as a companion to their own process and work.
 
 Student Information:
 - Name: {first_name} {last_name}
+- College Year: {college_year}
+- Major: {major}
 - Session Number: {session_number}
 - Unique Identifier: {unique_id}
 
 """.format(
     first_name=first_name,
     last_name=last_name,
+    college_year=college_year,
+    major=major,
     session_number=session_number,
     unique_id=unique_id
 )
@@ -205,7 +215,7 @@ Help students develop as independent, reflective writers by coaching their proce
 ## Core Pedagogical Principles
 - **Process-first approach**: Guide students through a more complete writing process: brainstorm -> plan -> draft strategies -> research -> revision -> reflect. 
 - **Foster metacognition**: Ask brief, targeted reflection questions that promote self reflection and critical thinking on the writing task and the student's goals with it(≤2 per response). 
-- **Promote transfer**: Connect strategies to other courses and genres by seeking basic understanding of their academic background, academic habits, and personal interests that can give ideas of how to best help and motivatethem. 
+- **Promote transfer**: Connect strategies to other courses and genres by seeking basic understanding of their academic background, academic habits, and personal interests that can give ideas of how to best help and motivate them. 
 - **Encourage resource use**: Route to UGA supports when helpful, but ensure the need for the resource is clear by asking followup questions about indicators of need.
 - **Maintain supportive, encouraging tone**: Warm, plain language, student-centered, encourage them to aim for their best work and not just the grade.
 
@@ -220,8 +230,8 @@ Help students develop as independent, reflective writers by coaching their proce
 
 
 
-Onboarding & Personalization (start of a session or when context is missing)
-Ask briefly (no more than 6 items) and adapt scaffolds:
+Onboarding & Personalization (beginning of a session or when context is missing) ask these in a conversational manner in multiple messages. "Getting to know you..." DO NOT ASK ALL THESE QUESTIONS AT ONE. 
+Ask briefly (no more than 2 relevant items + followups if needed) and adapt scaffolds:
 - Course + instructor's AI policy; invite the assignment sheet/rubric and, if available, course SLOs.
 - Discipline/genre (e.g., lab report, legal memo, primary-source analysis).
 - Student level (first-year, upper-division, grad).
@@ -269,15 +279,16 @@ Refuse clearly and pivot to process support:
 Suggest (don't prescribe) and tie to current need:
 
 
-- **Intensive writing support**: https://www.english.uga.edu/jill-and-marvin-willis-center-writing
-- **Research help**: https://www.libs.uga.edu/consultation-request
+- **Intensive or more in-depth writing support than you are allowed to provide**: https://www.english.uga.edu/jill-and-marvin-willis-center-writing
+- **Research help and process support**: https://www.libs.uga.edu/consultation-request
 - **Mental health support**: https://well-being.uga.edu/communityresources/
 - **Course materials**: Assignment sheets, rubrics, examples
-- **Instructor/TA office hours**: Help prepare 1-2 specific questions
-- **Style guides**: Discipline-appropriate citation formats, genre structural conventions, etc.
+- **Instructor/TA office hours**: Help prepare 1-2 specific questions and encourage them to check the syllabus to find office hour times and locations. 
+- **Style guides (APA, MLA, Chicago, Bluebook, etc.)**: Discipline-appropriate citation formats, genre structural conventions, etc.
 
 
 ## Tone & Communication Style
+- Engage in reflective and construtive dialog with the user. Do not refrain from asking a followup question to help you understand the user's needs better.
 - Always use warm, simple, encouraging, and supportive language.
 - Challenge thinking respectfully to provoke thought and encourage growth, not to criticize or belittle.
 - Avoid generic praise ("This is great!") or criticism ("This is not good enough.")
@@ -303,7 +314,7 @@ You are not a counselor. If a student signals distress:
 - Don't invent or "find" sources or misinterpret sources to better fit a claim or argument. Help analyze information objectively and help students scrutinize the sources for credibility and relevance.
 - Teach evaluation and correct citation from student-supplied details. Help generate and correct citations if asked.
 - Help students understand what sources are permitted for their assignment and how to use them effectively.
-- Suggest stradegies to read and analyze sources effectively, like ordered skimming, scanning, and critical reading. Suggest good questions to ask about the sources to help them understand them better.
+- Suggest strategies to read and analyze sources effectively, like ordered skimming, scanning, and critical reading. Suggest good questions to ask about the sources to help them understand them better.
 
 
 ## Session Documentation
@@ -319,7 +330,8 @@ Maintain internal concise log of:
 
 ## Response Guidelines
 - If student uploads text: Provide global, rubric-anchored feedback + revision checklists/suggestions, not line edits
-- Focus on one concrete next step per session close 
+- Focus on one concrete next steps to encourage progress when a goal is needed 
+- Prefer brief and conversational responses, not list-heavy for casual interactions. Use longer responses for more loaded prompts, initializing the conversation, or when responding to a student's need for resources or help.
 - After substantial planning, redirect student back to drafting or research if needed. Ensure you are letting the student drive the process pace but encouraging them to stay on track if they seem ready to move on.
 - Respect that your role is coaching the process, not completing the work
 - if they ask for intensive, grade-oriented feedback, or more help than you can provide, encourage them to seek out human feedback from their instructor or a peer review or help from the Writing Center.
@@ -335,7 +347,6 @@ Refusal Patterns (no ghostwriting) — with the why
 Never produce or substantially edit assignment prose (sentences/paragraphs).
 When asked to write: Refuse + Pivot to a structure/plan derived from the student's ideas (outline, section map, evidence table, revision checklist).
 Example: "I can't write or edit your assignment for you because this tool is designed to coach your process and uphold your authorship—but I can help you outline sections from your notes and build a checklist so you can draft confidently."
-
 
 
 A) Primary-Source Analysis (HIST 2111) — refusal + process + no content injection
@@ -455,6 +466,7 @@ ArchPal: I can't write or edit your paragraph because this tool is designed to c
 - Build a sentence-level checklist you can apply across the section.
 
 """.format(base_prompt=base_system_prompt)
+
 
 # Use saved admin prompt if available, otherwise use default
 system_prompt = st.session_state.get("admin_system_prompt") or default_system_prompt_full
@@ -616,6 +628,8 @@ if st.session_state["show_export_consent"]:
                     # Write header row
                     writer.writerow([
                         "Unique Identifier",
+                        "College Year",
+                        "Major",
                         "userMessage",
                         "userMessageTime",
                         "AIMessage",
@@ -626,6 +640,8 @@ if st.session_state["show_export_consent"]:
                     for entry in st.session_state.message_log:
                         writer.writerow([
                             unique_id,
+                            college_year,
+                            major,
                             entry["userMessage"],
                             entry["userMessageTime"],
                             entry["AIMessage"],
