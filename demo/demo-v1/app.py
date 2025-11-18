@@ -638,13 +638,17 @@ if st.session_state["show_export_consent"]:
 
                     # Write conversation rows
                     for entry in st.session_state.message_log:
+                        # Replace first name with [NAME] in message content for privacy
+                        anonymized_user_message = entry["userMessage"].replace(first_name, "[NAME]")
+                        anonymized_ai_message = entry["AIMessage"].replace(first_name, "[NAME]")
+
                         writer.writerow([
                             unique_id,
                             college_year,
                             major,
-                            entry["userMessage"],
+                            anonymized_user_message,
                             entry["userMessageTime"],
-                            entry["AIMessage"],
+                            anonymized_ai_message,
                             entry["AIMessageTime"]
                         ])
 
