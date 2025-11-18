@@ -32,8 +32,8 @@ if "data_privacy_acknowledged" not in st.session_state:
 
 # Step 1: Startup form for student information
 if st.session_state["student_info"] is None:
-    st.title("📝 Hello there, I'm ArchPal, UGA's writing companion!")
-    st.markdown("Please enter some information to help me get to know you better, allowing me to best support you in your writing journey.")
+    st.title("📝 Hello there! I'm ArchPal, UGA's New AI Writing Coach!")
+    st.markdown("Please enter some baisc information to help me get to know you better and tailor my coaching to you.")
     
     with st.form("student_info_form"):
         first_name = st.text_input("First Name", key="first_name")
@@ -211,7 +211,7 @@ with col1:
     st.image(logo_path, width=120)
 with col2:
     st.title("ArchPal AI Writing Companion")
-    st.caption("UGA English Department is developing Archpal: a new AI companion to help you plan, research, brainstorm, and create for any writing project! Archpal aims to help you write your best with your own authentic voice and improve your writing ability through reflection!")
+    st.caption("A small group of interdisciplinary UGA students and instructors are developing ArchPal: a new AI companion to help you plan, research, brainstorm, and create for any writing project! ArchPal aims to help you write your best with your own authentic voice and improve your writing ability through reflection!")
 
 # Sample prompt buttons
 st.markdown("### 💡 Quick Start Prompts")
