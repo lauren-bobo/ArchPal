@@ -15,10 +15,6 @@ if "messages" not in st.session_state:
     st.session_state["messages"] = []
 if "message_log" not in st.session_state:
     st.session_state["message_log"] = []
-if "admin_logged_in" not in st.session_state:
-    st.session_state["admin_logged_in"] = False
-if "show_admin_login" not in st.session_state:
-    st.session_state["show_admin_login"] = False
 if "admin_system_prompt" not in st.session_state:
     st.session_state["admin_system_prompt"] = None
 if "admin_role" not in st.session_state:
@@ -94,84 +90,6 @@ Student Information:
     unique_id=unique_id
 )
 
-# Admin login function
-def check_admin_credentials(username, password):
-    """Check if provided credentials match admin credentials from secrets"""
-    admin_username = st.secrets['admin_username']
-    admin_password = st.secrets['admin_password']
-    return username == admin_username and password == admin_password
-
-# Admin login overlay
-def show_admin_login():
-    """Display admin login overlay"""
-    with st.container():
-        st.markdown("---")
-        st.markdown("### 🔐 Admin Login")
-        st.markdown("Enter your credentials to access admin controls.")
-        with st.form("admin_login_form"):
-            username = st.text_input("Username", key="admin_username_input")
-            password = st.text_input("Password", type="password", key="admin_password_input")
-            col1, col2 = st.columns(2)
-            with col1:
-                login_submitted = st.form_submit_button("Login", use_container_width=True, type="primary")
-            with col2:
-                cancel_submitted = st.form_submit_button("Cancel", use_container_width=True)
-            
-            if login_submitted:
-                if check_admin_credentials(username, password):
-                    st.session_state["admin_logged_in"] = True
-                    st.session_state["show_admin_login"] = False
-                    st.rerun()
-                else:
-                    st.error("❌ Invalid username or password")
-            if cancel_submitted:
-                st.session_state["show_admin_login"] = False
-                st.rerun()
-        st.markdown("---")
-
-# Admin controls section
-def show_admin_controls():
-    """Display admin-only controls"""
-    st.markdown("### ⚙️ Admin Controls")
-    
-    # Get API key from secrets
-    anthropic_api_key = st.secrets['anthropic_api_key']
-    st.info("✅ API key configured via secrets")
-    
-    # Simple defaults - admin can customize as needed
-    default_role = "You are ArchPal, UGA's writing-process companion."
-    default_system_prompt = "Guide students through writing process: brainstorm → plan → draft → revise → reflect. Maintain academic integrity."
-    
-    # Use session state values if they exist, otherwise use defaults
-    current_role = st.session_state.get("admin_role", default_role)
-    current_system_prompt = st.session_state.get("admin_system_prompt", default_system_prompt)
-    
-    role = st.text_input("Role", key="role_input", value=current_role)
-    system_prompt = st.text_area("System Prompt", value=current_system_prompt,
-        height=100,
-        key="system_prompt_input"
-    )
-    
-    # Submit button to save changes and reinitialize LLM
-    if st.button("💾 Save & Reinitialize LLM", use_container_width=True, type="primary"):
-        # Save to session state
-        st.session_state["admin_role"] = role
-        st.session_state["admin_system_prompt"] = system_prompt
-        
-        # Clear conversation history to reinitialize LLM with new prompt
-        st.session_state["messages"] = []
-        st.session_state["message_log"] = []
-        
-        st.success("✅ Settings saved! Conversation history cleared. The LLM will use the new system prompt and role.")
-        st.rerun()
-    
-    st.divider()
-    
-    if st.button("🚪 Logout", use_container_width=True):
-        st.session_state["admin_logged_in"] = False
-        st.rerun()
-    
-    return anthropic_api_key, system_prompt
 
 # Main title
 col1, col2 = st.columns([1, 4])
@@ -199,9 +117,6 @@ for i, sample_prompt in enumerate(sample_prompts):
         prompt = sample_prompt.replace("Student: ", "")  # Remove the "Student: " prefix when sending to chat
     st.markdown("")  # Add spacing between buttons
 
-# Handle admin login overlay
-if st.session_state["show_admin_login"] and not st.session_state["admin_logged_in"]:
-    show_admin_login()
 
 # Get API key from secrets
 anthropic_api_key = st.secrets['anthropic_api_key']
@@ -470,24 +385,8 @@ ArchPal: I can't write or edit your paragraph because this tool is designed to c
 # Use saved admin prompt if available, otherwise use default
 system_prompt = st.session_state.get("admin_system_prompt") or default_system_prompt_full
 
-# Sidebar for admin controls (if logged in) or student info
+# Sidebar with student info
 with st.sidebar:
-    # Admin login/logout button
-    if st.session_state["admin_logged_in"]:
-        if st.button("👤 Admin Panel", use_container_width=True, type="secondary"):
-            st.session_state["show_admin_login"] = False
-    else:
-        if st.button("🔐 Admin Login", use_container_width=True, type="secondary"):
-            st.session_state["show_admin_login"] = True
-
-    st.divider()
-
-    if st.session_state["admin_logged_in"]:
-        anthropic_api_key_from_admin, _ = show_admin_controls()
-        if anthropic_api_key_from_admin:
-            anthropic_api_key = anthropic_api_key_from_admin
-        st.divider()
-
     st.markdown("### Student Information")
     st.text(f"Name: {first_name} {last_name}")
     st.text(f"Session: {session_number}")
@@ -498,7 +397,7 @@ with st.sidebar:
     st.markdown("1. ***Using ArchPal***: Press one of the sample prompts above to get started, or type and send your own message in the chat input below.")
     st.markdown("3. **Chat with ArchPal**: Ask questions about your writing project. Provide short sample text when appropriate.")
     st.markdown("4. **Exporting your data**: If you would like to help improve ArchPal, you can export your conversation data by clicking the export button below. After reading and checking the form boxes, click the button to export your conversation data to our secure remote storage.")
-    st.markdown("5. **Starting a new conversation**: After you have exported your conversation data (if you chose to), you can start a new conversation refreshing the page and begining a new session.")
+    st.markdown("5. **Starting a new conversation**: After you have exported your conversation data (if you chose to), you can start a new conversation refreshing the page and begining a new session, adding +1 to the session number.")
 
 # Display chat messages
 for message in st.session_state.messages:
