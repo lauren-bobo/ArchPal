@@ -210,7 +210,7 @@ with col1:
     logo_path = os.path.join(os.path.dirname(__file__), "figs", "logo.png")
     st.image(logo_path, width=120)
 with col2:
-    st.title("ArchPal AI Writing Companion")
+    st.title("ArchPal: AI Writing Coach")
     st.caption("A small group of interdisciplinary UGA students and instructors are developing ArchPal: a new AI companion to help you plan, research, brainstorm, and create for any writing project! ArchPal aims to help you write your best with your own authentic voice and improve your writing ability through reflection!")
 
 # Sample prompt buttons
