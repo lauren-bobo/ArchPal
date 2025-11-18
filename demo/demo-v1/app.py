@@ -210,7 +210,7 @@ anthropic_api_key = st.secrets['anthropic_api_key']
 # Priority: saved admin prompt > default prompt
 default_system_prompt_full = """{base_prompt}
 ## Your Primary Goal
-Help students develop as independent, reflective writers by coaching their process and encouraging self-reflection that improves their writing abilities across contexts.
+Help students develop as independent, reflective writers by coaching their process and encouraging self-reflection that deepens their thinking and enriches their learning experiences across contexts and through the course material.
 
 ## Core Pedagogical Principles
 - **Process-first approach**: Guide students through a more complete writing process: brainstorm -> plan -> draft strategies -> research -> revision -> reflect. 
@@ -228,8 +228,6 @@ Help students develop as independent, reflective writers by coaching their proce
 
 ## Session Framework
 
-
-
 Onboarding & Personalization (beginning of a session or when context is missing) ask these in a conversational manner in multiple messages. "Getting to know you..." DO NOT ASK ALL THESE QUESTIONS AT ONE. 
 Ask briefly (no more than 2 relevant items + followups if needed) and adapt scaffolds:
 - Course + instructor's AI policy; invite the assignment sheet/rubric and, if available, course SLOs.
@@ -244,12 +242,13 @@ Ask briefly (no more than 2 relevant items + followups if needed) and adapt scaf
 
 ### Each Coaching Interaction
 - Clarify the task/genre/length/audience/evidence expectations; skim the prompt/rubric when provided.
-- Offer small next steps (structures, checklists, question prompts).
+- If student uploads text: Provide global, rubric-anchored feedback + revision checklists/suggestions, not line edits + + encourage students to develop a revision plan and offer to help make one with thoughtful questions to guide revision. 
+- Offer small next steps (structures, checklists, question prompts). 
 - Co-plan work (timeboxing that the student adjusts; align plan to energy and schedule).
 - Ask ≤2 reflective questions (purpose, audience, evidence quality, reasoning).
 - Route resources (Writing Center, library subject guides, course materials, office hours, style guides) when relevant.
 - Encourage revision via targeted checks (thesis clarity, evidence-to-claim links, cohesion).
-- Close with one concrete action and an optional resource nudge.
+- Close with one concrete action and an optional resource nudge and, when the session is coming to a close, reflect on the session and the student's progress.
 
 
 ## Refusal Patterns (Maintaining Academic Integrity)
@@ -329,15 +328,14 @@ Maintain internal concise log of:
 
 
 ## Response Guidelines
-- If student uploads text: Provide global, rubric-anchored feedback + revision checklists/suggestions, not line edits
-- Focus on one concrete next steps to encourage progress when a goal is needed 
+- Focus on one concrete next steps to encourage progress when a goal is needed. 
 - Prefer brief and conversational responses, not list-heavy for casual interactions. Use longer responses for more loaded prompts, initializing the conversation, or when responding to a student's need for resources or help.
 - After substantial planning, redirect student back to drafting or research if needed. Ensure you are letting the student drive the process pace but encouraging them to stay on track if they seem ready to move on.
 - Respect that your role is coaching the process, not completing the work
 - if they ask for intensive, grade-oriented feedback, or more help than you can provide, encourage them to seek out human feedback from their instructor or a peer review or help from the Writing Center.
-- Don't encourage endless revision or over-editing. 
+- In revisions, make observations about ideas and writing to provide a reader’s perspective
 - Keep feedback focused on the rubric without primarily focusing on grades or promoting perfectionism.
-- Help them understand the importance of each step in the writing process and ask reflective questions about whether they feel they are meeting their goals.
+- Help them understand the importance of each step in the writing process and ask reflective questions about how they percieve their progress towards their goals.
 - Encourage them to take small steps and appropriately celebrate small wins with them.
 
 ## Example Scenarios
@@ -590,7 +588,7 @@ if st.session_state["show_export_consent"]:
 
         # Checkbox 2: Data privacy acknowledgment
         privacy_acknowledged = st.checkbox(
-            "I understand my conversation data will be temporarily associated with my name in order to match it with the consent form on file. I understand that my data will be anonymized before any further analysis is done for research and improvements.",
+            "We want you to trust that we care about your privacy and anonimity while helping archpal improve. I understand my conversation data will be stored in two separate secure locations: one with my raw conversation data (including my name) for matching with the consent form, and one with anonymized data (names replaced with [NAME]) for research and improvements. I understand that only the anonomized data will be viewed or used for research purposes.",
             key="privacy_checkbox_modal",
             value=st.session_state.get("data_privacy_acknowledged", False)
         )
@@ -621,67 +619,112 @@ if st.session_state["show_export_consent"]:
 
                 # Show loading spinner during export
                 with st.spinner("📤 Exporting your conversation data..."):
-                    # Format conversation as dataframe-style CSV
-                    output = io.StringIO()
-                    writer = csv.writer(output)
+                    # Get Dropbox access token from secrets
+                    dropbox_token = st.secrets["dropbox_access_token"]
 
-                    # Write header row
-                    writer.writerow([
-                        "Unique Identifier",
-                        "College Year",
-                        "Major",
-                        "userMessage",
-                        "userMessageTime",
-                        "AIMessage",
-                        "AIMessageTime"
-                    ])
+                    # Initialize Dropbox client
+                    dbx = dropbox.Dropbox(dropbox_token)
 
-                    # Write conversation rows
-                    for entry in st.session_state.message_log:
-                        # Replace first name with [NAME] in message content for privacy
-                        anonymized_user_message = entry["userMessage"].replace(first_name, "[NAME]")
-                        anonymized_ai_message = entry["AIMessage"].replace(first_name, "[NAME]")
+                    export_success = True
 
-                        writer.writerow([
-                            unique_id,
-                            college_year,
-                            major,
-                            anonymized_user_message,
-                            entry["userMessageTime"],
-                            anonymized_ai_message,
-                            entry["AIMessageTime"]
+                    try:
+                        # UPLOAD 1: Original data with names to dropbox_folder_path1
+                        output_original = io.StringIO()
+                        writer_original = csv.writer(output_original)
+
+                        # Write header row
+                        writer_original.writerow([
+                            "Unique Identifier",
+                            "College Year",
+                            "Major",
+                            "userMessage",
+                            "userMessageTime",
+                            "AIMessage",
+                            "AIMessageTime"
                         ])
 
-                    csv_string = output.getvalue()
-                    output.close()
+                        # Write conversation rows with original data (no name replacement)
+                        for entry in st.session_state.message_log:
+                            writer_original.writerow([
+                                unique_id,
+                                college_year,
+                                major,
+                                entry["userMessage"],
+                                entry["userMessageTime"],
+                                entry["AIMessage"],
+                                entry["AIMessageTime"]
+                            ])
 
-                    # Create filename for Dropbox upload
-                    filename = f"{last_name}_{first_name}_Session{session_number}.csv"
+                        csv_string_original = output_original.getvalue()
+                        output_original.close()
 
-                    # Upload to Dropbox
-                    export_success = False
-                    try:
-                        # Get Dropbox access token from secrets
-                        dropbox_token = st.secrets["dropbox_access_token"]
+                        # Create filename for original data
+                        filename_original = f"{last_name}_{first_name}_Session{session_number}.csv"
 
-                        # Initialize Dropbox client
-                        dbx = dropbox.Dropbox(dropbox_token)
+                        # Get folder path for original data
+                        folder_path1 = st.secrets.get('dropbox_folder_path1', '')
 
-                        # Get folder path from secrets (optional - defaults to root)
-                        folder_path = st.secrets.get('dropbox_folder_path', '')
+                        # Construct full path for original data
+                        if folder_path1 and not folder_path1.startswith('/'):
+                            folder_path1 = '/' + folder_path1
+                        if folder_path1 and not folder_path1.endswith('/'):
+                            folder_path1 = folder_path1 + '/'
+                        full_path_original = f"{folder_path1}{filename_original}"
 
-                        # Construct full path
-                        if folder_path and not folder_path.startswith('/'):
-                            folder_path = '/' + folder_path
-                        if folder_path and not folder_path.endswith('/'):
-                            folder_path = folder_path + '/'
-                        full_path = f"{folder_path}{filename}"
+                        # Upload original CSV to Dropbox
+                        csv_bytes_original = csv_string_original.encode('utf-8')
+                        dbx.files_upload(csv_bytes_original, full_path_original, mode=dropbox.files.WriteMode.overwrite)
 
-                        # Upload CSV to Dropbox
-                        csv_bytes = csv_string.encode('utf-8')
-                        dbx.files_upload(csv_bytes, full_path, mode=dropbox.files.WriteMode.overwrite)
+                        # UPLOAD 2: Anonymized data to dropbox_folder_path2
+                        output_anonymized = io.StringIO()
+                        writer_anonymized = csv.writer(output_anonymized)
 
-                        export_success = True
+                        # Write header row
+                        writer_anonymized.writerow([
+                            "Unique Identifier",
+                            "College Year",
+                            "Major",
+                            "userMessage",
+                            "userMessageTime",
+                            "AIMessage",
+                            "AIMessageTime"
+                        ])
+
+                        # Write conversation rows with anonymized data
+                        for entry in st.session_state.message_log:
+                            # Replace first name with [NAME] in message content for privacy
+                            anonymized_user_message = entry["userMessage"].replace(first_name, "[NAME]")
+                            anonymized_ai_message = entry["AIMessage"].replace(first_name, "[NAME]")
+
+                            writer_anonymized.writerow([
+                                unique_id,
+                                college_year,
+                                major,
+                                anonymized_user_message,
+                                entry["userMessageTime"],
+                                anonymized_ai_message,
+                                entry["AIMessageTime"]
+                            ])
+
+                        csv_string_anonymized = output_anonymized.getvalue()
+                        output_anonymized.close()
+
+                        # Create filename for anonymized data
+                        filename_anonymized = f"{unique_id}_Session{session_number}.csv"
+
+                        # Get folder path for anonymized data
+                        folder_path2 = st.secrets.get('dropbox_folder_path2', '')
+
+                        # Construct full path for anonymized data
+                        if folder_path2 and not folder_path2.startswith('/'):
+                            folder_path2 = '/' + folder_path2
+                        if folder_path2 and not folder_path2.endswith('/'):
+                            folder_path2 = folder_path2 + '/'
+                        full_path_anonymized = f"{folder_path2}{filename_anonymized}"
+
+                        # Upload anonymized CSV to Dropbox
+                        csv_bytes_anonymized = csv_string_anonymized.encode('utf-8')
+                        dbx.files_upload(csv_bytes_anonymized, full_path_anonymized, mode=dropbox.files.WriteMode.overwrite)
 
                     except Exception as e:
                         export_success = False
