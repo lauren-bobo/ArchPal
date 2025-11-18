@@ -209,6 +209,7 @@ anthropic_api_key = st.secrets['anthropic_api_key']
 # Determine which system prompt to use for LLM calls
 # Priority: saved admin prompt > default prompt
 default_system_prompt_full = """{base_prompt}
+
 ## Your Primary Goal
 Help students develop as independent, reflective writers by coaching their process and encouraging self-reflection that deepens their thinking and enriches their learning experiences across contexts and through the course material.
 
