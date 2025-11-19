@@ -1,13 +1,15 @@
 import streamlit as st
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+from langchain_core.tools import tool
 import uuid
 import csv
 import io
-from datetime import datetime
+from datetime import datetime, timedelta
 import dropbox
 import os
 import time
+import json
 
 # Constants
 ICON_PATH = os.path.join(os.path.dirname(__file__), "figs", "icon.jpg")
@@ -35,9 +37,50 @@ def initialize_session_state():
         st.session_state["consent_signed"] = False
     if "data_privacy_acknowledged" not in st.session_state:
         st.session_state["data_privacy_acknowledged"] = False
+    # Timer-related session state
+    if "timer_active" not in st.session_state:
+        st.session_state["timer_active"] = False
+    if "timer_minutes" not in st.session_state:
+        st.session_state["timer_minutes"] = 0
+    if "timer_start_time" not in st.session_state:
+        st.session_state["timer_start_time"] = None
+    if "timer_completed" not in st.session_state:
+        st.session_state["timer_completed"] = False
+    if "timer_cancelled" not in st.session_state:
+        st.session_state["timer_cancelled"] = False
+    if "pending_reflection_message" not in st.session_state:
+        st.session_state["pending_reflection_message"] = None
+    if "timer_stopped" not in st.session_state:
+        st.session_state["timer_stopped"] = False
+    if "timer_completion_checked" not in st.session_state:
+        st.session_state["timer_completion_checked"] = False
 
 # Initialize session state
 initialize_session_state()
+
+# Timer tool for LangChain agent
+@tool
+def set_timer(minutes: int) -> str:
+    """Set a timer for the specified number of minutes. 
+    
+    Args:
+        minutes: The number of minutes for the timer (must be a positive integer)
+    
+    Returns:
+        A confirmation message indicating the timer has been set
+    """
+    if minutes <= 0:
+        return "Error: Timer duration must be a positive number of minutes."
+    
+    st.session_state["timer_active"] = True
+    st.session_state["timer_minutes"] = minutes
+    st.session_state["timer_start_time"] = datetime.now()
+    st.session_state["timer_completed"] = False
+    st.session_state["timer_cancelled"] = False
+    st.session_state["timer_completion_checked"] = False
+    st.session_state["timer_stopped"] = False
+    
+    return f"Timer set for {minutes} minute(s). The timer will start now."
 
 # Step 1: Startup form for student information
 if st.session_state["student_info"] is None:
@@ -210,6 +253,19 @@ Maintain internal concise log of:
 - Offer downloadable summary (student-controlled) to attach to assignments
 
 
+## Timer Tool Usage
+You have access to a timer tool that can help students manage their writing time. Use this tool thoughtfully:
+
+- **When to suggest a timer**: When a student is planning focused work sessions, needs help with time management, or wants to practice timeboxing for writing tasks. This is especially useful when co-planning work sessions or helping students break down tasks into manageable time blocks.
+
+- **Always ask first**: Before setting a timer, you MUST ask the student if they would like to set a timer. For example: "Would you like me to set a timer for [X] minutes so you can focus on [task]?"
+
+- **Only set timer if student agrees**: Only use the set_timer tool if the student explicitly agrees (says yes, sure, okay, etc.). Do not set timers without student consent.
+
+- **After timer completes**: When a timer finishes (either by completing or being cancelled), you will automatically receive a message asking you to prompt the student for reflection. Ask them to reflect on what they accomplished during the timer period. This helps build metacognitive awareness about their writing process and time management.
+
+- **Timer behavior**: When a timer is set, it will display in a modal that pauses interaction until it completes or is closed. The student will be able to see the countdown and can close it early if needed.
+
 ## Response Guidelines
 - Focus on one concrete next steps to encourage progress when a goal is needed. 
 - Prefer brief and conversational responses, not list-heavy for casual interactions. Use longer responses for more loaded prompts, initializing the conversation, or when responding to a student's need for resources or help.
@@ -352,6 +408,115 @@ ArchPal: I can't write or edit your paragraph because this tool is designed to c
     college_year=college_year,
     major=major
 )
+
+# Timer component display function - non-blocking approach
+def show_timer_component():
+    """Display timer using st.empty() with minimal reruns - allows interaction"""
+    if not st.session_state["timer_active"]:
+        return
+    
+    st.markdown("---")
+    st.markdown("### ⏱️ Writing Timer")
+    
+    timer_placeholder = st.empty()
+    
+    start_time = st.session_state["timer_start_time"]
+    duration_seconds = st.session_state["timer_minutes"] * 60
+    end_time = start_time + timedelta(seconds=duration_seconds)
+    
+    now = datetime.now()
+    remaining_seconds = max(0, int((end_time - now).total_seconds()))
+    
+    if remaining_seconds <= 0:
+        st.session_state["timer_completed"] = True
+        st.session_state["timer_active"] = False
+        timer_placeholder.markdown(
+            """
+            <div style="text-align: center; padding: 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; color: white; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                <div style="font-size: 64px; font-weight: bold; font-family: 'Courier New', monospace; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);">
+                    00:00
+                </div>
+                <div style="font-size: 24px; margin-top: 10px;">Time's up! ⏰</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        mins, secs = divmod(remaining_seconds, 60)
+        time_display = '{:02d}:{:02d}'.format(mins, secs)
+        
+        timer_placeholder.markdown(
+            f"""
+            <div style="text-align: center; padding: 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; color: white; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                <div style="font-size: 64px; font-weight: bold; font-family: 'Courier New', monospace; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);">
+                    {time_display}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("Stop Timer", use_container_width=True, type="secondary", key="stop_timer_btn"):
+            st.session_state["timer_cancelled"] = True
+            st.session_state["timer_active"] = False
+            st.session_state["timer_stopped"] = True
+            st.rerun()
+    
+    if remaining_seconds > 0 and st.session_state["timer_active"]:
+        if "last_timer_check" not in st.session_state:
+            st.session_state["last_timer_check"] = datetime.now()
+        
+        time_since_check = (datetime.now() - st.session_state["last_timer_check"]).total_seconds()
+        
+        if time_since_check >= 1.0:
+            st.session_state["last_timer_check"] = datetime.now()
+            time.sleep(0.05)
+            st.rerun()
+
+# Background LLM communication for reflection
+def send_reflection_request(anthropic_api_key, system_prompt, timer_minutes, was_cancelled):
+    """Send background message to LLM requesting reflection prompt"""
+    try:
+        chat = ChatAnthropic(
+            model=st.secrets.get("anthropic_model", "claude-3-5-sonnet-20241022"),
+            anthropic_api_key=anthropic_api_key,
+            temperature=st.secrets.get("anthropic_temperature", 0.7),
+            max_tokens=st.secrets.get("anthropic_max_tokens", 1024)
+        )
+        
+        status = "been cancelled" if was_cancelled else "completed"
+        background_message = f"The timer for {timer_minutes} minute(s) has {status}. Please ask the student to reflect on what they accomplished during this time."
+        
+        # Prepare messages (system prompt + conversation history + background message)
+        # Note: background_message is NOT added to visible chat messages
+        langchain_messages = [SystemMessage(content=system_prompt)]
+        langchain_messages.extend(st.session_state.messages)
+        langchain_messages.append(HumanMessage(content=background_message))
+        
+        response = chat.invoke(langchain_messages)
+        
+        # Add only the reflection response to visible chat messages (not the background message)
+        reflection_ai_message = AIMessage(content=response.content)
+        st.session_state.messages.append(reflection_ai_message)
+        
+        # Log the reflection response (background message is logged but not displayed)
+        ai_timestamp = datetime.now()
+        st.session_state.message_log.append({
+            "userMessage": background_message,
+            "userMessageTime": ai_timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            "AIMessage": response.content,
+            "AIMessageTime": ai_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        })
+        
+    except Exception as e:
+        # Fallback reflection message if LLM call fails
+        fallback_message = f"I'd love to hear about what you accomplished during the {timer_minutes} minute timer. What did you work on?"
+        reflection_ai_message = AIMessage(content=fallback_message)
+        st.session_state.messages.append(reflection_ai_message)
 
 # Admin login function
 def check_admin_credentials(username, password):
@@ -536,6 +701,23 @@ anthropic_api_key = st.secrets['anthropic_api_key']
 # If admin has set a custom system prompt, it completely replaces the default
 system_prompt = st.session_state.get("admin_system_prompt") or default_system_prompt_full
 
+# Handle timer state transitions
+if st.session_state["timer_completed"] or st.session_state["timer_cancelled"]:
+    # Timer finished - send background LLM message for reflection
+    was_cancelled = st.session_state["timer_cancelled"]
+    timer_minutes = st.session_state["timer_minutes"]
+    send_reflection_request(anthropic_api_key, system_prompt, timer_minutes, was_cancelled)
+    # Reset timer flags
+    st.session_state["timer_completed"] = False
+    st.session_state["timer_cancelled"] = False
+    st.session_state["timer_completion_checked"] = False
+    st.session_state["timer_stopped"] = False
+    st.rerun()
+
+# Check if timer is active - show component
+if st.session_state["timer_active"]:
+    show_timer_component()
+
 # Sidebar for admin controls (if logged in) or student info
 with st.sidebar:
     # Admin login/logout button
@@ -587,37 +769,113 @@ if prompt := st.chat_input():
     st.chat_message("user").write(prompt)
 
     # Create Claude chat model
-    chat = ChatAnthropic(
+    llm = ChatAnthropic(
         model=st.secrets.get("anthropic_model", "claude-3-5-sonnet-20241022"),
         anthropic_api_key=anthropic_api_key,
         temperature=st.secrets.get("anthropic_temperature", 0.7),
         max_tokens=st.secrets.get("anthropic_max_tokens", 1024)
     )
 
-    # Prepare messages for LangChain (system prompt + conversation history)
-    langchain_messages = [SystemMessage(content=system_prompt)]
-    langchain_messages.extend(st.session_state.messages)
-
-    # Get response from Claude
+    # Create tools list
+    tools = [set_timer]
+    
+    # Use native tool calling with bind_tools (LangChain 1.0+ approach)
     try:
+        # Bind tools to LLM
+        llm_with_tools = llm.bind_tools(tools)
+        
+        # Prepare messages for LangChain (system prompt + conversation history)
+        langchain_messages = [SystemMessage(content=system_prompt)]
+        langchain_messages.extend(st.session_state.messages)
+        
+        # Get response from LLM with tool calling
         with st.spinner("ArchPal is thinking..."):
-            response = chat.invoke(langchain_messages)
-        ai_message = AIMessage(content=response.content)
+            response = llm_with_tools.invoke(langchain_messages)
+        
+        # Handle tool calls if any
+        final_response = ""
+        
+        # Check if response has tool calls (LangChain 1.0+ structure)
+        has_tool_calls = hasattr(response, 'tool_calls') and response.tool_calls
+        
+        if has_tool_calls:
+            # Add the AI message with tool calls to conversation
+            langchain_messages.append(response)
+            
+            # Execute tool calls
+            for tool_call in response.tool_calls:
+                tool_name = tool_call.get("name") or tool_call.get("function", {}).get("name", "")
+                tool_args = tool_call.get("args") or tool_call.get("function", {}).get("arguments", {})
+                tool_call_id = tool_call.get("id") or tool_call.get("function", {}).get("id", "")
+                
+                # Parse args if it's a string (JSON)
+                if isinstance(tool_args, str):
+                    try:
+                        tool_args = json.loads(tool_args)
+                    except:
+                        tool_args = {}
+                
+                # Find and execute the tool
+                for tool in tools:
+                    if tool.name == tool_name:
+                        try:
+                            tool_result = tool.invoke(tool_args)
+                            # Add tool result as ToolMessage
+                            langchain_messages.append(
+                                ToolMessage(
+                                    content=str(tool_result),
+                                    tool_call_id=tool_call_id
+                                )
+                            )
+                        except Exception as tool_error:
+                            # Add error message if tool execution fails
+                            langchain_messages.append(
+                                ToolMessage(
+                                    content=f"Error executing tool: {str(tool_error)}",
+                                    tool_call_id=tool_call_id
+                                )
+                            )
+                        break
+            
+            # Get final response after tool execution
+            final_response_obj = llm_with_tools.invoke(langchain_messages)
+            final_response = final_response_obj.content if hasattr(final_response_obj, 'content') else str(final_response_obj)
+        else:
+            final_response = response.content if hasattr(response, 'content') else str(response)
+        
+        # If timer was activated, the tool will have set session state
+        # We need to trigger a rerun to show the timer modal
+        if st.session_state["timer_active"]:
+            st.rerun()
+        
+        # Add AI response to messages
+        ai_message = AIMessage(content=final_response)
         st.session_state.messages.append(ai_message)
 
-        # Step 2: Save conversation pair to log with timestamps
+        # Save conversation pair to log with timestamps
         ai_timestamp = datetime.now()
         st.session_state.message_log.append({
             "userMessage": prompt,
             "userMessageTime": user_timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-            "AIMessage": response.content,
+            "AIMessage": final_response,
             "AIMessageTime": ai_timestamp.strftime("%Y-%m-%d %H:%M:%S")
         })
 
-        st.chat_message("assistant", avatar=ICON_PATH).write(response.content)
+        st.chat_message("assistant", avatar=ICON_PATH).write(final_response)
+        
     except Exception as e:
         st.error(f"Error: {str(e)}")
-        st.stop()
+        # Fallback to direct LLM call if tool calling fails
+        try:
+            langchain_messages = [SystemMessage(content=system_prompt)]
+            langchain_messages.extend(st.session_state.messages)
+            response = llm.invoke(langchain_messages)
+            ai_message = AIMessage(content=response.content)
+            st.session_state.messages.append(ai_message)
+            st.chat_message("assistant", avatar=ICON_PATH).write(response.content)
+        except Exception as e2:
+            st.error(f"Fallback error: {str(e2)}")
+            st.stop()
 
 # Step 3: Export button
 st.divider()
