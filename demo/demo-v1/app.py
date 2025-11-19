@@ -212,7 +212,44 @@ def show_admin_controls():
     
     return anthropic_api_key, system_prompt
 
-def create_csv_data(first_name, last_name, unique_id):
+def create_csv_data(message_log, unique_id, college_year, major, first_name, anonymize=False):
+    """Create CSV data from message log, optionally anonymizing names"""
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    writer.writerow([
+        "Unique Identifier",
+        "College Year",
+        "Major",
+        "userMessage",
+        "userMessageTime",
+        "AIMessage",
+        "AIMessageTime"
+    ])
+    
+    for entry in message_log:
+        user_message = entry["userMessage"]
+        ai_message = entry["AIMessage"]
+        
+        if anonymize:
+            user_message = user_message.replace(first_name, "[NAME]")
+            ai_message = ai_message.replace(first_name, "[NAME]")
+        
+        writer.writerow([
+            unique_id,
+            college_year,
+            major,
+            user_message,
+            entry["userMessageTime"],
+            ai_message,
+            entry["AIMessageTime"]
+        ])
+    
+    csv_string = output.getvalue()
+    output.close()
+    return csv_string
+
+def create_identifier_csv(first_name, last_name, unique_id):
     """Create single row CSV data with first name, last name, and unique identifier"""
     output = io.StringIO()
     writer = csv.writer(output)
@@ -420,11 +457,24 @@ if st.session_state["show_export_consent"]:
                     export_success = True
                     
                     try:
-                        # Upload single row CSV with first name, last name, and unique identifier
-                        csv_data = create_csv_data(first_name, last_name, unique_id)
-                        filename = f"{last_name}_{first_name}_Session{session_number}.csv"
-                        path = build_dropbox_path('dropbox_folder_path1', filename)
-                        upload_to_dropbox(csv_data, path)
+                        # Upload anonymized conversation data (full conversation with names replaced)
+                        csv_anonymized = create_csv_data(
+                            st.session_state.message_log,
+                            unique_id,
+                            college_year,
+                            major,
+                            first_name,
+                            anonymize=True
+                        )
+                        filename_anonymized = f"{unique_id}_Session{session_number}.csv"
+                        path_anonymized = build_dropbox_path('dropbox_folder_path1', filename_anonymized)
+                        upload_to_dropbox(csv_anonymized, path_anonymized)
+                        
+                        # Upload identifier CSV (single row with first_name, last_name, unique_id)
+                        csv_identifier = create_identifier_csv(first_name, last_name, unique_id)
+                        filename_identifier = f"{unique_id}_identifier.csv"
+                        path_identifier = build_dropbox_path('dropbox_folder_path2', filename_identifier)
+                        upload_to_dropbox(csv_identifier, path_identifier)
                         
                     except Exception as e:
                         export_success = False
