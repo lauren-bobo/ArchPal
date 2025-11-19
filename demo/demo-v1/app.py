@@ -7,28 +7,37 @@ import io
 from datetime import datetime
 import dropbox
 import os
+import time
+
+# Constants
+ICON_PATH = os.path.join(os.path.dirname(__file__), "figs", "icon.jpg")
+LOGO_PATH = os.path.join(os.path.dirname(__file__), "figs", "logo.png")
+
+def initialize_session_state():
+    """Initialize all session state variables with default values"""
+    if "student_info" not in st.session_state:
+        st.session_state["student_info"] = None
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = []
+    if "message_log" not in st.session_state:
+        st.session_state["message_log"] = []
+    if "admin_logged_in" not in st.session_state:
+        st.session_state["admin_logged_in"] = False
+    if "show_admin_login" not in st.session_state:
+        st.session_state["show_admin_login"] = False
+    if "admin_system_prompt" not in st.session_state:
+        st.session_state["admin_system_prompt"] = None
+    if "admin_role" not in st.session_state:
+        st.session_state["admin_role"] = None
+    if "show_export_consent" not in st.session_state:
+        st.session_state["show_export_consent"] = False
+    if "consent_signed" not in st.session_state:
+        st.session_state["consent_signed"] = False
+    if "data_privacy_acknowledged" not in st.session_state:
+        st.session_state["data_privacy_acknowledged"] = False
 
 # Initialize session state
-if "student_info" not in st.session_state:
-    st.session_state["student_info"] = None
-if "messages" not in st.session_state:
-    st.session_state["messages"] = []
-if "message_log" not in st.session_state:
-    st.session_state["message_log"] = []
-if "admin_logged_in" not in st.session_state:
-    st.session_state["admin_logged_in"] = False
-if "show_admin_login" not in st.session_state:
-    st.session_state["show_admin_login"] = False
-if "admin_system_prompt" not in st.session_state:
-    st.session_state["admin_system_prompt"] = None
-if "admin_role" not in st.session_state:
-    st.session_state["admin_role"] = None
-if "show_export_consent" not in st.session_state:
-    st.session_state["show_export_consent"] = False
-if "consent_signed" not in st.session_state:
-    st.session_state["consent_signed"] = False
-if "data_privacy_acknowledged" not in st.session_state:
-    st.session_state["data_privacy_acknowledged"] = False
+initialize_session_state()
 
 # Step 1: Startup form for student information
 if st.session_state["student_info"] is None:
@@ -75,171 +84,13 @@ major = student_info["major"]
 session_number = student_info["session_number"]
 unique_id = student_info["unique_id"]
 
-# Build enhanced system prompt with student context
-base_system_prompt = """ You are ArchPal, UGA's writing coach and friendly helpful companion. You coach students through brainstorming, planning, drafting strategies, revision, reflection, and resource use—while upholding academic integrity. You do not write or substantially edit assignment prose. Instead, you help students grow their own writing skills by serving as a companion to their own process and work.
+# Build default system prompt with student context
+default_system_prompt_full = """ You are ArchPal, UGA's writing coach and friendly helpful companion. You coach students through brainstorming, planning, drafting strategies, revision, reflection, and resource use—while upholding academic integrity. You do not write or substantially edit assignment prose. Instead, you help students grow their own writing skills by serving as a companion to their own process and work.
 
 Student Information:
 - Name: {first_name} {last_name}
 - College Year: {college_year}
 - Major: {major}
-- Session Number: {session_number}
-- Unique Identifier: {unique_id}
-
-""".format(
-    first_name=first_name,
-    last_name=last_name,
-    college_year=college_year,
-    major=major,
-    session_number=session_number,
-    unique_id=unique_id
-)
-
-# Admin login function
-def check_admin_credentials(username, password):
-    """Check if provided credentials match admin credentials from secrets"""
-    admin_username = st.secrets['admin_username']
-    admin_password = st.secrets['admin_password']
-    return username == admin_username and password == admin_password
-
-# Admin login overlay
-def show_admin_login():
-    """Display admin login overlay"""
-    st.markdown("---")
-    st.markdown("### 🔐 Admin Login")
-    st.markdown("Enter your credentials to access admin controls.")
-    with st.form("admin_login_form"):
-        username = st.text_input("Username", key="admin_username_input")
-        password = st.text_input("Password", type="password", key="admin_password_input")
-        col1, col2 = st.columns(2)
-        with col1:
-            login_submitted = st.form_submit_button("Login", use_container_width=True, type="primary")
-        with col2:
-            cancel_submitted = st.form_submit_button("Cancel", use_container_width=True)
-
-        if login_submitted:
-            if check_admin_credentials(username, password):
-                st.session_state["admin_logged_in"] = True
-                st.session_state["show_admin_login"] = False
-                st.rerun()
-            else:
-                st.error("❌ Invalid username or password")
-        if cancel_submitted:
-            st.session_state["show_admin_login"] = False
-            st.rerun()
-    st.markdown("---")
-
-# Admin controls section
-def show_admin_controls():
-    """Display admin-only controls"""
-    st.markdown("### ⚙️ Admin Controls")
-    
-    # Get API key from secrets
-    anthropic_api_key = st.secrets['anthropic_api_key']
-    st.info("✅ API key configured via secrets")
-    
-    # Simple defaults - admin can customize as needed
-    default_role = "You are ArchPal, UGA's writing-process companion."
-    default_system_prompt = "Guide students through writing process: brainstorm → plan → draft → revise → reflect. Maintain academic integrity."
-    
-    # Use session state values if they exist, otherwise use defaults
-    current_role = st.session_state.get("admin_role", default_role)
-    current_system_prompt = st.session_state.get("admin_system_prompt", default_system_prompt_full)
-    
-    role = st.text_input("Role", key="role_input", value=current_role)
-    system_prompt = st.text_area("System Prompt", value=current_system_prompt,
-        height=100,
-        key="system_prompt_input"
-    )
-    
-    # Submit button to save changes and reinitialize LLM
-    if st.button("💾 Save & Reinitialize LLM", use_container_width=True, type="primary"):
-        # Save to session state
-        st.session_state["admin_role"] = role
-        st.session_state["admin_system_prompt"] = system_prompt
-        
-        # Clear conversation history to reinitialize LLM with new prompt
-        st.session_state["messages"] = []
-        st.session_state["message_log"] = []
-        
-        st.success("✅ Settings saved! Conversation history cleared. The LLM will use the new system prompt and role.")
-        st.rerun()
-    
-    st.divider()
-
-    # CSV download section
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("### 📊 Download Configuration")
-        st.markdown("Download the current role and system prompt as a CSV file.")
-
-    with col2:
-        if st.button("📥 Download CSV", use_container_width=True, type="secondary"):
-            # Create CSV with role and system prompt
-            output = io.StringIO()
-            writer = csv.writer(output)
-
-            # Write header row
-            writer.writerow(["Role", "System Prompt"])
-
-            # Write data row
-            writer.writerow([current_role, current_system_prompt])
-
-            csv_string = output.getvalue()
-            output.close()
-
-            # Create download link
-            st.download_button(
-                label="⬇️ Download CSV",
-                data=csv_string,
-                file_name="archpal_config.csv",
-                mime="text/csv",
-                key="download_config_csv"
-            )
-
-    st.divider()
-
-    if st.button("🚪 Logout", use_container_width=True):
-        st.session_state["admin_logged_in"] = False
-        st.rerun()
-    
-    return anthropic_api_key, system_prompt
-
-# Main title
-col1, col2 = st.columns([1, 4])
-with col1:
-    logo_path = os.path.join(os.path.dirname(__file__), "figs", "logo.png")
-    st.image(logo_path, width=120)
-with col2:
-    st.title("ArchPal: AI Writing Coach")
-    st.caption("A small group of interdisciplinary UGA students and instructors are developing ArchPal: a new AI companion to help you plan, research, brainstorm, and create for any writing project! ArchPal aims to help you write your best with your own authentic voice and improve your writing ability through reflection!")
-
-# Sample prompt buttons
-st.markdown("### 💡 Quick Start Prompts")
-
-sample_prompts = [
-    "I'm working on the Genre Exploration capstone project. I need to choose a genre for my future academic or professional work, but I'm not sure where to start researching it. Help me brainstorm ideas and plan out my research.",
-    "For my Genre Exploration project, I need to write a guide for my future self about applying something from class to my chosen genre. How should I plan this 10-page guide? What are some good writing habits that can help me complete it effectively?",
-    " I just finished peer review on my Genre Exploration draft. I have comments everywhere about connecting class concepts to my chosen genre and how I'm not being completely clear in my instructions. What do I do next?"
-]
-
-prompt = None
-
-# Display prompts in long ovals above chat bar
-for i, sample_prompt in enumerate(sample_prompts):
-    if st.button(sample_prompt, key=f"sample_prompt_{i}", use_container_width=True):
-        prompt = sample_prompt.replace("Student: ", "")  # Remove the "Student: " prefix when sending to chat
-    st.markdown("")  # Add spacing between buttons
-
-# Handle admin login overlay
-if st.session_state["show_admin_login"] and not st.session_state["admin_logged_in"]:
-    show_admin_login()
-
-# Get API key from secrets
-anthropic_api_key = st.secrets['anthropic_api_key']
-
-# Determine which system prompt to use for LLM calls
-# Priority: saved admin prompt > default prompt
-default_system_prompt_full = """{base_prompt}
 
 ## Your Primary Goal
 Help students develop as independent, reflective writers by coaching their process and encouraging self-reflection that deepens their thinking and enriches their learning experiences across contexts and through the course material.
@@ -365,7 +216,7 @@ Maintain internal concise log of:
 - After substantial planning, redirect student back to drafting or research if needed. Ensure you are letting the student drive the process pace but encouraging them to stay on track if they seem ready to move on.
 - Respect that your role is coaching the process, not completing the work
 - if they ask for intensive, grade-oriented feedback, or more help than you can provide, encourage them to seek out human feedback from their instructor or a peer review or help from the Writing Center.
-- In revisions, make observations about ideas and writing to provide a reader’s perspective
+- In revisions, make observations about ideas and writing to provide a reader's perspective
 - Keep feedback focused on the rubric without primarily focusing on grades or promoting perfectionism.
 - Help them understand the importance of each step in the writing process and ask reflective questions about how they percieve their progress towards their goals.
 - Encourage them to take small steps and appropriately celebrate small wins with them.
@@ -495,10 +346,194 @@ ArchPal: I can't write or edit your paragraph because this tool is designed to c
 - Flag evidence-to-claim connections to strengthen, and
 - Build a sentence-level checklist you can apply across the section.
 
-""".format(base_prompt=base_system_prompt)
+""".format(
+    first_name=first_name,
+    last_name=last_name,
+    college_year=college_year,
+    major=major
+)
+
+# Admin login function
+def check_admin_credentials(username, password):
+    """Check if provided credentials match admin credentials from secrets"""
+    admin_username = st.secrets['admin_username']
+    admin_password = st.secrets['admin_password']
+    return username == admin_username and password == admin_password
+
+# Admin login overlay
+def show_admin_login():
+    """Display admin login overlay"""
+    st.markdown("---")
+    st.markdown("### 🔐 Admin Login")
+    st.markdown("Enter your credentials to access admin controls.")
+    with st.form("admin_login_form"):
+        username = st.text_input("Username", key="admin_username_input")
+        password = st.text_input("Password", type="password", key="admin_password_input")
+        col1, col2 = st.columns(2)
+        with col1:
+            login_submitted = st.form_submit_button("Login", use_container_width=True, type="primary")
+        with col2:
+            cancel_submitted = st.form_submit_button("Cancel", use_container_width=True)
+
+        if login_submitted:
+            if check_admin_credentials(username, password):
+                st.session_state["admin_logged_in"] = True
+                st.session_state["show_admin_login"] = False
+                st.rerun()
+            else:
+                st.error("❌ Invalid username or password")
+        if cancel_submitted:
+            st.session_state["show_admin_login"] = False
+            st.rerun()
+    st.markdown("---")
+
+# Admin controls section
+def show_admin_controls():
+    """Display admin-only controls"""
+    st.markdown("### ⚙️ Admin Controls")
+    
+    # Get API key from secrets
+    anthropic_api_key = st.secrets['anthropic_api_key']
+    st.info("✅ API key configured via secrets")
+    
+    # Simple defaults - admin can customize as needed
+    default_role = "You are ArchPal, UGA's writing-process companion."
+    default_system_prompt = "Guide students through writing process: brainstorm → plan → draft → revise → reflect. Maintain academic integrity."
+    
+    # Use session state values if they exist, otherwise use defaults
+    current_role = st.session_state.get("admin_role", default_role)
+    current_system_prompt = st.session_state.get("admin_system_prompt", default_system_prompt_full)
+    
+    role = st.text_input("Role", key="role_input", value=current_role)
+    system_prompt = st.text_area("System Prompt", value=current_system_prompt,
+        height=100,
+        key="system_prompt_input"
+    )
+    
+    # Submit button to save changes and reinitialize LLM
+    if st.button("💾 Save & Reinitialize LLM", use_container_width=True, type="primary"):
+        # Save to session state
+        st.session_state["admin_role"] = role
+        st.session_state["admin_system_prompt"] = system_prompt
+        
+        # Clear conversation history to reinitialize LLM with new prompt
+        st.session_state["messages"] = []
+        st.session_state["message_log"] = []
+        
+        st.success("✅ Settings saved! Conversation history cleared. The LLM will use the new system prompt and role.")
+        st.rerun()
+    
+    st.divider()
+
+    # CSV download section
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown("### 📊 Download Configuration")
+        st.markdown("Download the current role and system prompt as a CSV file.")
+
+    with col2:
+        if st.button("📥 Download CSV", use_container_width=True, type="secondary"):
+            # Create CSV with role and system prompt
+            output = io.StringIO()
+            writer = csv.writer(output)
+
+            # Write header row
+            writer.writerow(["Role", "System Prompt"])
+
+            # Write data row
+            writer.writerow([current_role, current_system_prompt])
+
+            csv_string = output.getvalue()
+            output.close()
+
+            # Create download link
+            st.download_button(
+                label="⬇️ Download CSV",
+                data=csv_string,
+                file_name="archpal_config.csv",
+                mime="text/csv",
+                key="download_config_csv"
+            )
+
+    st.divider()
+
+    if st.button("🚪 Logout", use_container_width=True):
+        st.session_state["admin_logged_in"] = False
+        st.rerun()
+    
+    return anthropic_api_key, system_prompt
+
+def create_csv_data(message_log, unique_id, college_year, major, first_name, anonymize=False):
+    """Create CSV data from message log, optionally anonymizing names"""
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    writer.writerow([
+        "Unique Identifier",
+        "College Year",
+        "Major",
+        "userMessage",
+        "userMessageTime",
+        "AIMessage",
+        "AIMessageTime"
+    ])
+    
+    for entry in message_log:
+        user_message = entry["userMessage"]
+        ai_message = entry["AIMessage"]
+        
+        if anonymize:
+            user_message = user_message.replace(first_name, "[NAME]")
+            ai_message = ai_message.replace(first_name, "[NAME]")
+        
+        writer.writerow([
+            unique_id,
+            college_year,
+            major,
+            user_message,
+            entry["userMessageTime"],
+            ai_message,
+            entry["AIMessageTime"]
+        ])
+    
+    csv_string = output.getvalue()
+    output.close()
+    return csv_string
+
+def build_dropbox_path(folder_key, filename):
+    """Build a properly formatted Dropbox path from folder key and filename"""
+    folder_path = st.secrets.get(folder_key, '')
+    if folder_path and not folder_path.startswith('/'):
+        folder_path = '/' + folder_path
+    if folder_path and not folder_path.endswith('/'):
+        folder_path = folder_path + '/'
+    return f"{folder_path}{filename}"
+
+def upload_to_dropbox(csv_data, filepath):
+    """Upload CSV data to Dropbox at the specified filepath"""
+    dropbox_token = st.secrets["dropbox_access_token"]
+    dbx = dropbox.Dropbox(dropbox_token)
+    csv_bytes = csv_data.encode('utf-8')
+    dbx.files_upload(csv_bytes, filepath, mode=dropbox.files.WriteMode.overwrite)
+
+# Main title
+col1, col2 = st.columns([1, 4])
+with col1:
+    st.image(LOGO_PATH, width=120)
+with col2:
+    st.title("ArchPal: AI Writing Coach")
+    st.caption("A small group of interdisciplinary UGA students and instructors are developing ArchPal: a new AI companion to help you plan, research, brainstorm, and create for any writing project! ArchPal aims to help you write your best with your own authentic voice and improve your writing ability through reflection!")
+
+# Handle admin login overlay
+if st.session_state["show_admin_login"] and not st.session_state["admin_logged_in"]:
+    show_admin_login()
+
+# Get API key from secrets
+anthropic_api_key = st.secrets['anthropic_api_key']
 
 
 # Use saved admin prompt if available, otherwise use default
+# If admin has set a custom system prompt, it completely replaces the default
 system_prompt = st.session_state.get("admin_system_prompt") or default_system_prompt_full
 
 # Sidebar for admin controls (if logged in) or student info
@@ -526,21 +561,20 @@ with st.sidebar:
     st.divider()
 
     st.markdown("### 📋 Demo Instructions")
-    st.markdown("1. ***Using ArchPal***: Press one of the sample prompts above to get started, or type and send your own message in the chat input below.")
-    st.markdown("3. **Chat with ArchPal**: Ask questions about your writing project. Provide short sample text when appropriate.")
-    st.markdown("4. **Exporting your data**: If you would like to help improve ArchPal, you can export your conversation data by clicking the export button below. After reading and checking the form boxes, click the button to export your conversation data to our secure remote storage.")
-    st.markdown("5. **Starting a new conversation**: After you have exported your conversation data (if you chose to), you can start a new conversation refreshing the page and begining a new session, adding +1 to the session number.")
+    st.markdown("1. ***Using ArchPal***: Type and send your message in the chat input below to get started.")
+    st.markdown("2. **Chat with ArchPal**: Ask questions about your writing project. Provide short sample text when appropriate.")
+    st.markdown("3. **Exporting your data**: If you would like to help improve ArchPal, you can export your conversation data by clicking the export button below. After reading and checking the form boxes, click the button to export your conversation data to our secure remote storage.")
+    st.markdown("4. **Starting a new conversation**: After you have exported your conversation data (if you chose to), you can start a new conversation refreshing the page and begining a new session, adding +1 to the session number.")
 
 # Display chat messages
 for message in st.session_state.messages:
     if isinstance(message, HumanMessage):
         st.chat_message("user").write(message.content)
     elif isinstance(message, AIMessage):
-        icon_path = os.path.join(os.path.dirname(__file__), "figs", "icon.jpg")
-        st.chat_message("assistant", avatar=icon_path).write(message.content)
+        st.chat_message("assistant", avatar=ICON_PATH).write(message.content)
 
 # Chat input
-if prompt := st.chat_input() or prompt:
+if prompt := st.chat_input():
     if not anthropic_api_key:
         st.info("Please add your Anthropic API key to continue.")
         st.stop()
@@ -580,8 +614,7 @@ if prompt := st.chat_input() or prompt:
             "AIMessageTime": ai_timestamp.strftime("%Y-%m-%d %H:%M:%S")
         })
 
-        icon_path = os.path.join(os.path.dirname(__file__), "figs", "icon.jpg")
-        st.chat_message("assistant", avatar=icon_path).write(response.content)
+        st.chat_message("assistant", avatar=ICON_PATH).write(response.content)
     except Exception as e:
         st.error(f"Error: {str(e)}")
         st.stop()
@@ -651,113 +684,35 @@ if st.session_state["show_export_consent"]:
 
                 # Show loading spinner during export
                 with st.spinner("📤 Exporting your conversation data..."):
-                    # Get Dropbox access token from secrets
-                    dropbox_token = st.secrets["dropbox_access_token"]
-
-                    # Initialize Dropbox client
-                    dbx = dropbox.Dropbox(dropbox_token)
-
                     export_success = True
-
+                    
                     try:
-                        # UPLOAD 1: Original data with names to dropbox_folder_path1
-                        output_original = io.StringIO()
-                        writer_original = csv.writer(output_original)
-
-                        # Write header row
-                        writer_original.writerow([
-                            "Unique Identifier",
-                            "College Year",
-                            "Major",
-                            "userMessage",
-                            "userMessageTime",
-                            "AIMessage",
-                            "AIMessageTime"
-                        ])
-
-                        # Write conversation rows with original data (no name replacement)
-                        for entry in st.session_state.message_log:
-                            writer_original.writerow([
-                                unique_id,
-                                college_year,
-                                major,
-                                entry["userMessage"],
-                                entry["userMessageTime"],
-                                entry["AIMessage"],
-                                entry["AIMessageTime"]
-                            ])
-
-                        csv_string_original = output_original.getvalue()
-                        output_original.close()
-
-                        # Create filename for original data
+                        # Upload original data with names
+                        csv_original = create_csv_data(
+                            st.session_state.message_log,
+                            unique_id,
+                            college_year,
+                            major,
+                            first_name,
+                            anonymize=False
+                        )
                         filename_original = f"{last_name}_{first_name}_Session{session_number}.csv"
-
-                        # Get folder path for original data
-                        folder_path1 = st.secrets.get('dropbox_folder_path1', '')
-
-                        # Construct full path for original data
-                        if folder_path1 and not folder_path1.startswith('/'):
-                            folder_path1 = '/' + folder_path1
-                        if folder_path1 and not folder_path1.endswith('/'):
-                            folder_path1 = folder_path1 + '/'
-                        full_path_original = f"{folder_path1}{filename_original}"
-
-                        # Upload original CSV to Dropbox
-                        csv_bytes_original = csv_string_original.encode('utf-8')
-                        dbx.files_upload(csv_bytes_original, full_path_original, mode=dropbox.files.WriteMode.overwrite)
-
-                        # UPLOAD 2: Anonymized data to dropbox_folder_path2
-                        output_anonymized = io.StringIO()
-                        writer_anonymized = csv.writer(output_anonymized)
-
-                        # Write header row
-                        writer_anonymized.writerow([
-                            "Unique Identifier",
-                            "College Year",
-                            "Major",
-                            "userMessage",
-                            "userMessageTime",
-                            "AIMessage",
-                            "AIMessageTime"
-                        ])
-
-                        # Write conversation rows with anonymized data
-                        for entry in st.session_state.message_log:
-                            # Replace first name with [NAME] in message content for privacy
-                            anonymized_user_message = entry["userMessage"].replace(first_name, "[NAME]")
-                            anonymized_ai_message = entry["AIMessage"].replace(first_name, "[NAME]")
-
-                            writer_anonymized.writerow([
-                                unique_id,
-                                college_year,
-                                major,
-                                anonymized_user_message,
-                                entry["userMessageTime"],
-                                anonymized_ai_message,
-                                entry["AIMessageTime"]
-                            ])
-
-                        csv_string_anonymized = output_anonymized.getvalue()
-                        output_anonymized.close()
-
-                        # Create filename for anonymized data
+                        path_original = build_dropbox_path('dropbox_folder_path1', filename_original)
+                        upload_to_dropbox(csv_original, path_original)
+                        
+                        # Upload anonymized data
+                        csv_anonymized = create_csv_data(
+                            st.session_state.message_log,
+                            unique_id,
+                            college_year,
+                            major,
+                            first_name,
+                            anonymize=True
+                        )
                         filename_anonymized = f"{unique_id}_Session{session_number}.csv"
-
-                        # Get folder path for anonymized data
-                        folder_path2 = st.secrets.get('dropbox_folder_path2', '')
-
-                        # Construct full path for anonymized data
-                        if folder_path2 and not folder_path2.startswith('/'):
-                            folder_path2 = '/' + folder_path2
-                        if folder_path2 and not folder_path2.endswith('/'):
-                            folder_path2 = folder_path2 + '/'
-                        full_path_anonymized = f"{folder_path2}{filename_anonymized}"
-
-                        # Upload anonymized CSV to Dropbox
-                        csv_bytes_anonymized = csv_string_anonymized.encode('utf-8')
-                        dbx.files_upload(csv_bytes_anonymized, full_path_anonymized, mode=dropbox.files.WriteMode.overwrite)
-
+                        path_anonymized = build_dropbox_path('dropbox_folder_path2', filename_anonymized)
+                        upload_to_dropbox(csv_anonymized, path_anonymized)
+                        
                     except Exception as e:
                         export_success = False
 
@@ -765,6 +720,8 @@ if st.session_state["show_export_consent"]:
                 if export_success:
                     st.success("🎉 Your conversations have been submitted. Thank you for helping improve ArchPal!")
                     st.balloons()  # Add celebratory balloons
+                    # Keep success message visible for 3 seconds
+                    time.sleep(3)
                 else:
                     st.error("❌ Export failed. Please try again or contact support.")
 
