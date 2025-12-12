@@ -65,7 +65,7 @@ For archpal.org homepage:
 </a>
 ```
 
-**Permanent (once deployed):**
+**Permanent (once deployed) (give login page link to href):**
 ```html
 <a href="" 
    style="display: inline-block; padding: 12px 24px; background-color: #BA0C2F; 
