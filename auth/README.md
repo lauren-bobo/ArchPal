@@ -77,6 +77,6 @@ For archpal.org homepage:
 
 - **To view webpages:** Run `python manage.py runserver` in the auth folder
 - **To see design:** View screenshots above
-- **Login template:** `core/templates/core/login.html`
+- **Login template:** `core/templates/registration/login.html`
 
 ---
