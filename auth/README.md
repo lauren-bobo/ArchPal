@@ -22,7 +22,7 @@ http://localhost:8000/login
 
 ### Or View Screenshots Below
 
-I've added screenshots of all the login pages so you can see what they look like without running the app.
+I've added screenshots of all the authentication pages so you can see what they look like without running the app.
 
 ---
 
