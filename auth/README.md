@@ -31,6 +31,11 @@ I've added screenshots of all the authentication pages so you can see what they 
 
 ## Screenshots
 
+### Landing Page
+![Landing Page](screenshots/landing.png)
+
+**Template Location:** `core/templates/core/landing.html`
+
 ### Login Page
 ![Login Page](screenshots/login.png)
 

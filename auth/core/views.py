@@ -10,6 +10,9 @@ from .forms import CustomUserCreationForm
 def dashboard(request):
     return render(request, 'dashboard.html')
 
+def landing(request):
+    return render(request, "core/landing.html")
+
 def signup(request):
     error = None
     form = CustomUserCreationForm()
