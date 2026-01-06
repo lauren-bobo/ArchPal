@@ -37,14 +37,14 @@ I've added screenshots of all the authentication pages so you can see what they 
 **Template Location:** `core/templates/core/landing.html`
 
 ### Login Page
-![Login Page](screenshots/login.png)
+![Login Page](screenshots/login1.png)
 
 **Template Location:** `core/templates/registration/login.html`
 
 ---
 
 ### Signup Page
-![Signup Page](screenshots/signup.png)
+![Signup Page](screenshots/signup1.png)
 
 **Template Location:** `core/templates/registration/signup.html`
 
