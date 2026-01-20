@@ -1,13 +1,16 @@
 import streamlit as st
-from langchain_anthropic import ChatAnthropic
+from langchain_aws import ChatBedrock
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+import boto3
 import uuid
-import csv
-import io
-from datetime import datetime
-import dropbox
 import os
 import time
+from datetime import datetime
+import io
+import csv
+
+# Local imports
+from utils import cognito_auth, data_export
 
 # Constants
 ICON_PATH = os.path.join(os.path.dirname(__file__), "figs", "icon.jpg")
@@ -38,55 +41,61 @@ def initialize_session_state():
         "data_privacy_acknowledged": False,
         "chat_model": None,
         "chat_model_config": None,
-        "dropbox_client": None,
         "default_system_prompt": None
     }
     for key, default_value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = default_value
+    
+    # Initialize Auth State
+    cognito_auth.init_auth_state()
 
 # Initialize session state
 initialize_session_state()
 
+# Step 0: Authentication
+if not cognito_auth.login():
+    st.stop()
+
 # Step 1: Startup form for student information
 if st.session_state["student_info"] is None:
     st.title("📝 Hello there! I'm ArchPal, UGA's New AI Writing Coach!")
-    st.markdown("Please enter some baisc information to help me get to know you better and tailor my coaching to you.")
+    st.markdown("Please enter some basic information to help me get to know you better and tailor my coaching to you.")
     
     with st.form("student_info_form"):
+        # Pre-fill email from auth user if available
+        auth_email = st.session_state.get("auth_user", {}).get("email", "")
+        if auth_email:
+            st.info(f"Logged in as: {auth_email}")
+            
         first_name = st.text_input("First Name", key="first_name")
         last_name = st.text_input("Last Name", key="last_name")
         college_year = st.selectbox("College Year", ["First Year", "Second Year", "Upper-Division", "Masters Student", "PhD Student"], key="college_year")
         major = st.text_input("Major", key="major")
         session_number = st.text_input("Session Number", key="session_number")
-        session_password = st.text_input("Session Password", type="password", key="session_password")
+        # Session Password removed - handled by Cognito
+        
         submitted = st.form_submit_button("Start Session", use_container_width=True)
 
         if submitted:
-            # Get the correct password from secrets
-            secrets = get_secrets()
-            correct_password = secrets.get("session_password", "")
-
-            # Trim trailing spaces from all inputs except password
+            # Trim trailing spaces from all inputs
             first_name = first_name.strip() if first_name else first_name
             last_name = last_name.strip() if last_name else last_name
             major = major.strip() if major else major
             session_number = session_number.strip() if session_number else session_number
 
-            if first_name and last_name and college_year and major and session_number and session_password:
-                if session_password == correct_password:
-                    unique_id = str(uuid.uuid4())
-                    st.session_state["student_info"] = {
-                        "first_name": first_name,
-                        "last_name": last_name,
-                        "college_year": college_year,
-                        "major": major,
-                        "session_number": session_number,
-                        "unique_id": unique_id
-                    }
-                    st.rerun()
-                else:
-                    st.error("❌ Incorrect session password. Please check with your session facilitator.")
+            if first_name and last_name and college_year and major and session_number:
+                unique_id = str(uuid.uuid4())
+                st.session_state["student_info"] = {
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "college_year": college_year,
+                    "major": major,
+                    "session_number": session_number,
+                    "unique_id": unique_id,
+                    "email": auth_email
+                }
+                st.rerun()
             else:
                 st.error("Please fill in all fields.")
     st.stop()
@@ -162,10 +171,10 @@ def show_admin_controls():
     """Display admin-only controls"""
     st.markdown("### ⚙️ Admin Controls")
     
-    # Get API key from secrets
+    # Get AWS credentials from secrets
     secrets = get_secrets()
-    anthropic_api_key = secrets['anthropic_api_key']
-    st.info("✅ API key configured via secrets")
+    aws_region = secrets.get('aws_region', 'us-east-1')
+    st.info(f"✅ AWS Bedrock configured (Region: {aws_region})")
     
     # Simple defaults - admin can customize as needed
     default_role = "You are ArchPal, UGA's writing-process companion."
@@ -232,93 +241,11 @@ def show_admin_controls():
 
     st.divider()
 
-    if st.button("🚪 Logout", use_container_width=True):
+    if st.button("🚪 Admin Logout", use_container_width=True):
         st.session_state["admin_logged_in"] = False
         st.rerun()
     
-    return anthropic_api_key, system_prompt
-
-def create_csv_data(message_log, unique_id, college_year, major, first_name, anonymize=False):
-    """Create CSV data from message log, optionally anonymizing names"""
-    output = io.StringIO()
-    writer = csv.writer(output)
-    
-    writer.writerow([
-        "Unique Identifier",
-        "College Year",
-        "Major",
-        "userMessage",
-        "userMessageTime",
-        "AIMessage",
-        "AIMessageTime"
-    ])
-    
-    for entry in message_log:
-        user_message = entry["userMessage"]
-        ai_message = entry["AIMessage"]
-        
-        if anonymize:
-            user_message = user_message.replace(first_name, "[NAME]")
-            ai_message = ai_message.replace(first_name, "[NAME]")
-        
-        writer.writerow([
-            unique_id,
-            college_year,
-            major,
-            user_message,
-            entry["userMessageTime"],
-            ai_message,
-            entry["AIMessageTime"]
-        ])
-    
-    csv_string = output.getvalue()
-    output.close()
-    return csv_string
-
-def create_identifier_csv(first_name, last_name, unique_id):
-    """Create single row CSV data with first name, last name, and unique identifier"""
-    output = io.StringIO()
-    writer = csv.writer(output)
-    
-    writer.writerow([
-        "first_name",
-        "last_name",
-        "unique_id"
-    ])
-    
-    writer.writerow([
-        first_name,
-        last_name,
-        unique_id
-    ])
-    
-    csv_string = output.getvalue()
-    output.close()
-    return csv_string
-
-def get_dropbox_client():
-    """Get or create cached Dropbox client"""
-    if st.session_state["dropbox_client"] is None:
-        secrets = get_secrets()
-        dropbox_token = secrets["dropbox_access_token"]
-        st.session_state["dropbox_client"] = dropbox.Dropbox(dropbox_token)
-    return st.session_state["dropbox_client"]
-
-def build_dropbox_path(folder_key, filename):
-    """Build a properly formatted Dropbox path from folder key and filename"""
-    secrets = get_secrets()
-    folder_path = secrets.get(folder_key, '')
-    if folder_path and not folder_path.startswith('/'):
-        folder_path = '/' + folder_path
-    if folder_path and not folder_path.endswith('/'):
-        folder_path = folder_path + '/'
-    return f"{folder_path}{filename}"
-
-def upload_to_dropbox(csv_data, filepath):
-    """Upload CSV data to Dropbox at the specified filepath"""
-    dbx = get_dropbox_client()
-    csv_bytes = csv_data.encode('utf-8')
-    dbx.files_upload(csv_bytes, filepath, mode=dropbox.files.WriteMode.overwrite)
+    return system_prompt
 
 # Main title
 col1, col2 = st.columns([1, 4])
@@ -332,9 +259,8 @@ with col2:
 if st.session_state["show_admin_login"] and not st.session_state["admin_logged_in"]:
     show_admin_login()
 
-# Get API key from secrets
+# Get secrets
 secrets = get_secrets()
-anthropic_api_key = secrets['anthropic_api_key']
 
 # Use saved admin prompt if available, otherwise use default
 # If admin has set a custom system prompt, it completely replaces the default
@@ -342,6 +268,15 @@ system_prompt = st.session_state.get("admin_system_prompt") or default_system_pr
 
 # Sidebar for admin controls (if logged in) or student info
 with st.sidebar:
+    # User info and Logout
+    if st.session_state.get("authenticated"):
+        auth_email = st.session_state.get("auth_user", {}).get("email", "User")
+        st.write(f"Logged in as: **{auth_email}**")
+        if st.button("LOGOUT", type="primary", use_container_width=True):
+            cognito_auth.logout()
+    
+    st.divider()
+
     # Admin login/logout button
     if st.session_state["admin_logged_in"]:
         if st.button("👤 Admin Panel", use_container_width=True, type="secondary"):
@@ -353,9 +288,7 @@ with st.sidebar:
     st.divider()
 
     if st.session_state["admin_logged_in"]:
-        anthropic_api_key_from_admin, _ = show_admin_controls()
-        if anthropic_api_key_from_admin:
-            anthropic_api_key = anthropic_api_key_from_admin
+        show_admin_controls()
         st.divider()
 
     st.markdown("### Student Information")
@@ -371,16 +304,27 @@ with st.sidebar:
     st.markdown("4. **Starting a new conversation**: After you have exported your conversation data (if you chose to), you can start a new conversation refreshing the page and begining a new session, adding +1 to the session number.")
 
 # Display chat messages
-for message in st.session_state.messages:
-    if isinstance(message, HumanMessage):
-        st.chat_message("user").write(message.content)
-    elif isinstance(message, AIMessage):
-        st.chat_message("assistant", avatar=ICON_PATH).write(message.content)
+if "messages" in st.session_state:
+    for message in st.session_state.messages:
+        if isinstance(message, HumanMessage):
+            st.chat_message("user").write(message.content)
+        elif isinstance(message, AIMessage):
+            st.chat_message("assistant", avatar=ICON_PATH).write(message.content)
 
 # Chat input
 if prompt := st.chat_input():
-    if not anthropic_api_key:
-        st.info("Please add your Anthropic API key to continue.")
+    # Verify AWS credentials are configured
+    secrets = get_secrets()
+    aws_key = secrets.get('aws_access_key_id', '')
+    aws_secret = secrets.get('aws_secret_access_key', '')
+    
+    # Check if credentials exist and are not placeholder values
+    if (not aws_key or not aws_secret or 
+        'YOUR_AWS' in aws_key or 'YOUR_AWS' in aws_secret or
+        aws_key.strip() == '' or aws_secret.strip() == ''):
+        st.error("⚠️ AWS credentials not configured properly in secrets.toml")
+        st.info("Please update `.streamlit/secrets.toml` with your actual AWS credentials and restart Streamlit.")
+        st.code(f"Current aws_access_key_id: {aws_key[:10]}... (length: {len(aws_key)})", language="text")
         st.stop()
 
     # Add user message to session state with timestamp
@@ -390,11 +334,20 @@ if prompt := st.chat_input():
 
     st.chat_message("user").write(prompt)
 
-    # Get or create cached Claude chat model
+    # Get or create cached Claude chat model via AWS Bedrock
     secrets = get_secrets()
+    
+    # Create Bedrock client with AWS credentials
+    bedrock_client = boto3.client(
+        service_name='bedrock-runtime',
+        region_name=secrets.get('aws_region', 'us-east-1'),
+        aws_access_key_id=secrets.get('aws_access_key_id'),
+        aws_secret_access_key=secrets.get('aws_secret_access_key')
+    )
+    
     model_config = {
-        "model": secrets.get("anthropic_model"),
-        "anthropic_api_key": anthropic_api_key,
+        "model_id": secrets.get("anthropic_model"),
+        "region_name": secrets.get('aws_region', 'us-east-1'),
         "temperature": secrets.get("anthropic_temperature"),
         "max_tokens": secrets.get("anthropic_max_tokens")
     }
@@ -403,14 +356,21 @@ if prompt := st.chat_input():
     cached_config = st.session_state["chat_model_config"]
     config_changed = (
         cached_config is None or
-        cached_config.get("model") != model_config["model"] or
-        cached_config.get("anthropic_api_key") != model_config["anthropic_api_key"] or
+        cached_config.get("model_id") != model_config["model_id"] or
+        cached_config.get("region_name") != model_config["region_name"] or
         cached_config.get("temperature") != model_config["temperature"] or
         cached_config.get("max_tokens") != model_config["max_tokens"]
     )
     
     if st.session_state["chat_model"] is None or config_changed:
-        st.session_state["chat_model"] = ChatAnthropic(**model_config)
+        st.session_state["chat_model"] = ChatBedrock(
+            client=bedrock_client,
+            model_id=model_config["model_id"],
+            model_kwargs={
+                "temperature": model_config["temperature"],
+                "max_tokens": model_config["max_tokens"]
+            }
+        )
         st.session_state["chat_model_config"] = model_config.copy()
     
     chat = st.session_state["chat_model"]
@@ -505,30 +465,12 @@ if st.session_state["show_export_consent"]:
 
                 # Show loading spinner during export
                 with st.spinner("📤 Exporting your conversation data..."):
-                    export_success = True
                     
-                    try:
-                        # Upload anonymized conversation data (full conversation with names replaced)
-                        csv_anonymized = create_csv_data(
-                            st.session_state.message_log,
-                            unique_id,
-                            college_year,
-                            major,
-                            first_name,
-                            anonymize=True
-                        )
-                        filename_anonymized = f"{unique_id}_Session{session_number}.csv"
-                        path_anonymized = build_dropbox_path('dropbox_folder_path1', filename_anonymized)
-                        upload_to_dropbox(csv_anonymized, path_anonymized)
-                        
-                        # Upload identifier CSV (single row with first_name, last_name, unique_id)
-                        csv_identifier = create_identifier_csv(first_name, last_name, unique_id)
-                        filename_identifier = f"{unique_id}_identifier.csv"
-                        path_identifier = build_dropbox_path('dropbox_folder_path2', filename_identifier)
-                        upload_to_dropbox(csv_identifier, path_identifier)
-                        
-                    except Exception as e:
-                        export_success = False
+                    # Use the new utility function for export
+                    export_success = data_export.handle_export(
+                        st.session_state["student_info"],
+                        st.session_state["message_log"]
+                    )
 
                 # Show result message
                 if export_success:
