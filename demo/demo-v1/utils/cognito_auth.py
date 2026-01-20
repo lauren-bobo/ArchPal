@@ -10,16 +10,16 @@ from datetime import datetime, time
 def get_cognito_config():
     """Get Cognito configuration from secrets"""
     try:
-        if "cognito" not in st.secrets:
+        if "cognito_user_pool_id" not in st.secrets:
             # Fallback for dev/testing if secrets not set up
             return None
             
         return {
-            "pool_id": st.secrets["cognito"]["user_pool_id"],
-            "app_client_id": st.secrets["cognito"]["client_id"],
-            "domain": st.secrets["cognito"]["domain"],
-            "region": st.secrets["cognito"]["region"],
-            "redirect_uri": st.secrets["cognito"]["redirect_uri"]
+            "pool_id": st.secrets["cognito_user_pool_id"],
+            "app_client_id": st.secrets["cognito_client_id"],
+            "domain": st.secrets["cognito_domain"],
+            "region": st.secrets["cognito_region"],
+            "redirect_uri": st.secrets["cognito_redirect_uri"]
         }
     except Exception as e:
         st.error(f"Error loading Cognito configuration: {str(e)}")

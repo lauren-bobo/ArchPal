@@ -1,6 +1,7 @@
 import streamlit as st
-from langchain_anthropic import ChatAnthropic
+from langchain_aws import ChatBedrock
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+import boto3
 import uuid
 import os
 import time
@@ -170,10 +171,10 @@ def show_admin_controls():
     """Display admin-only controls"""
     st.markdown("### ⚙️ Admin Controls")
     
-    # Get API key from secrets
+    # Get AWS credentials from secrets
     secrets = get_secrets()
-    anthropic_api_key = secrets['anthropic_api_key']
-    st.info("✅ API key configured via secrets")
+    aws_region = secrets.get('aws_region', 'us-east-1')
+    st.info(f"✅ AWS Bedrock configured (Region: {aws_region})")
     
     # Simple defaults - admin can customize as needed
     default_role = "You are ArchPal, UGA's writing-process companion."
@@ -244,7 +245,7 @@ def show_admin_controls():
         st.session_state["admin_logged_in"] = False
         st.rerun()
     
-    return anthropic_api_key, system_prompt
+    return system_prompt
 
 # Main title
 col1, col2 = st.columns([1, 4])
@@ -258,9 +259,8 @@ with col2:
 if st.session_state["show_admin_login"] and not st.session_state["admin_logged_in"]:
     show_admin_login()
 
-# Get API key from secrets
+# Get secrets
 secrets = get_secrets()
-anthropic_api_key = secrets['anthropic_api_key']
 
 # Use saved admin prompt if available, otherwise use default
 # If admin has set a custom system prompt, it completely replaces the default
@@ -288,9 +288,7 @@ with st.sidebar:
     st.divider()
 
     if st.session_state["admin_logged_in"]:
-        anthropic_api_key_from_admin, _ = show_admin_controls()
-        if anthropic_api_key_from_admin:
-            anthropic_api_key = anthropic_api_key_from_admin
+        show_admin_controls()
         st.divider()
 
     st.markdown("### Student Information")
@@ -314,8 +312,18 @@ for message in st.session_state.messages:
 
 # Chat input
 if prompt := st.chat_input():
-    if not anthropic_api_key:
-        st.info("Please add your Anthropic API key to continue.")
+    # Verify AWS credentials are configured
+    secrets = get_secrets()
+    aws_key = secrets.get('aws_access_key_id', '')
+    aws_secret = secrets.get('aws_secret_access_key', '')
+    
+    # Check if credentials exist and are not placeholder values
+    if (not aws_key or not aws_secret or 
+        'YOUR_AWS' in aws_key or 'YOUR_AWS' in aws_secret or
+        aws_key.strip() == '' or aws_secret.strip() == ''):
+        st.error("⚠️ AWS credentials not configured properly in secrets.toml")
+        st.info("Please update `.streamlit/secrets.toml` with your actual AWS credentials and restart Streamlit.")
+        st.code(f"Current aws_access_key_id: {aws_key[:10]}... (length: {len(aws_key)})", language="text")
         st.stop()
 
     # Add user message to session state with timestamp
@@ -325,11 +333,20 @@ if prompt := st.chat_input():
 
     st.chat_message("user").write(prompt)
 
-    # Get or create cached Claude chat model
+    # Get or create cached Claude chat model via AWS Bedrock
     secrets = get_secrets()
+    
+    # Create Bedrock client with AWS credentials
+    bedrock_client = boto3.client(
+        service_name='bedrock-runtime',
+        region_name=secrets.get('aws_region', 'us-east-1'),
+        aws_access_key_id=secrets.get('aws_access_key_id'),
+        aws_secret_access_key=secrets.get('aws_secret_access_key')
+    )
+    
     model_config = {
-        "model": secrets.get("anthropic_model"),
-        "anthropic_api_key": anthropic_api_key,
+        "model_id": secrets.get("anthropic_model"),
+        "region_name": secrets.get('aws_region', 'us-east-1'),
         "temperature": secrets.get("anthropic_temperature"),
         "max_tokens": secrets.get("anthropic_max_tokens")
     }
@@ -338,14 +355,21 @@ if prompt := st.chat_input():
     cached_config = st.session_state["chat_model_config"]
     config_changed = (
         cached_config is None or
-        cached_config.get("model") != model_config["model"] or
-        cached_config.get("anthropic_api_key") != model_config["anthropic_api_key"] or
+        cached_config.get("model_id") != model_config["model_id"] or
+        cached_config.get("region_name") != model_config["region_name"] or
         cached_config.get("temperature") != model_config["temperature"] or
         cached_config.get("max_tokens") != model_config["max_tokens"]
     )
     
     if st.session_state["chat_model"] is None or config_changed:
-        st.session_state["chat_model"] = ChatAnthropic(**model_config)
+        st.session_state["chat_model"] = ChatBedrock(
+            client=bedrock_client,
+            model_id=model_config["model_id"],
+            model_kwargs={
+                "temperature": model_config["temperature"],
+                "max_tokens": model_config["max_tokens"]
+            }
+        )
         st.session_state["chat_model_config"] = model_config.copy()
     
     chat = st.session_state["chat_model"]
