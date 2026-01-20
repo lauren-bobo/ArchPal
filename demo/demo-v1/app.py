@@ -304,11 +304,12 @@ with st.sidebar:
     st.markdown("4. **Starting a new conversation**: After you have exported your conversation data (if you chose to), you can start a new conversation refreshing the page and begining a new session, adding +1 to the session number.")
 
 # Display chat messages
-for message in st.session_state.messages:
-    if isinstance(message, HumanMessage):
-        st.chat_message("user").write(message.content)
-    elif isinstance(message, AIMessage):
-        st.chat_message("assistant", avatar=ICON_PATH).write(message.content)
+if "messages" in st.session_state:
+    for message in st.session_state.messages:
+        if isinstance(message, HumanMessage):
+            st.chat_message("user").write(message.content)
+        elif isinstance(message, AIMessage):
+            st.chat_message("assistant", avatar=ICON_PATH).write(message.content)
 
 # Chat input
 if prompt := st.chat_input():
