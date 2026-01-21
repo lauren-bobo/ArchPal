@@ -135,22 +135,33 @@ def login():
             
     # If not authenticated and no code, show login button
     if not st.session_state.get("authenticated", False):
-        st.markdown("### 🔐 Login Required")
-        st.markdown("Please log in with your UGA credentials to continue.")
-        
-        # Method 1: Use native Streamlit link button
+        # Welcome text
+        st.markdown("## Welcome")
+        st.markdown("**ArchPal** is an AI companion designed at UGA to support you as a writer, learner, and thinker.")
+        st.markdown("""
+- A partner to talk through ideas before and as you write
+- A tool to help you revise, reorganize, and reflect
+- A low-stakes partner available anytime
+- A way to practice explaining your thinking
+- A resource to help you access other support at UGA and online
+""")
+        st.markdown("*You'll be redirected to a secure login screen.*")
+
+        # Login button
         st.link_button(
-            "🔑 Login with UGA Account",
+            "🔑 Login with UGA Email",
             auth_url,
             type="primary",
             use_container_width=True
         )
-        
-        # Method 2: JavaScript redirect as fallback (in case link_button has issues)
+
         st.markdown("---")
-        st.markdown("*If the button above doesn't work, click below:*")
-        if st.button("🔄 Alternative Login Method", use_container_width=True):
-            st.markdown(f'<meta http-equiv="refresh" content="0;url={auth_url}">', unsafe_allow_html=True)
+        st.markdown("### Quick tips")
+        st.markdown("""
+- Share the assignment prompt and rubric with ArchPal.
+- When getting started, ask for a plan to help you manage a writing project.
+- Later on, ask for revision priorities and a checklist to guide your work.
+""")
         
         return False
         
