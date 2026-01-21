@@ -135,33 +135,15 @@ def login():
             
     # If not authenticated and no code, show login button
     if not st.session_state.get("authenticated", False):
-        # Debug: Show the auth URL being used
-        st.info(f"🔍 Debug: Login URL = {auth_url}")
+        st.markdown("### 🔐 Login Required")
+        st.markdown("Please log in with your UGA credentials to continue.")
         
-        st.markdown(
-            f"""
-            <a href="{auth_url}" target="_self" class="login-button">
-                <div style="
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    background-color: #BA0C2F; 
-                    color: white; 
-                    padding: 12px 24px; 
-                    border-radius: 8px; 
-                    text-decoration: none; 
-                    font-weight: bold; 
-                    margin: 20px 0;
-                    width: 100%;
-                    max-width: 300px;
-                    text-align: center;
-                    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                ">
-                    Login
-                </div>
-            </a>
-            """, 
-            unsafe_allow_html=True
+        # Use native Streamlit link button instead of HTML
+        st.link_button(
+            "🔑 Login with UGA Account",
+            auth_url,
+            type="primary",
+            use_container_width=True
         )
         return False
         
