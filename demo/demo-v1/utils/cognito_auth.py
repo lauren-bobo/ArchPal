@@ -140,7 +140,14 @@ def login():
         
         # Use button with JavaScript redirect
         if st.button("🔑 Login with UGA Account", type="primary", use_container_width=True):
-            st.markdown(f'<meta http-equiv="refresh" content="0;url={auth_url}">', unsafe_allow_html=True)
+            st.markdown(
+                f"""
+                <script>
+                    window.location.href = "{auth_url}";
+                </script>
+                """,
+                unsafe_allow_html=True
+            )
         
         return False
         
