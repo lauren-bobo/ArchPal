@@ -5,7 +5,7 @@ import requests
 import base64
 import json
 from datetime import datetime, time
-from datetime import datetime, time
+from urllib.parse import quote
 
 def get_cognito_config():
     """Get Cognito configuration from secrets"""
@@ -60,7 +60,7 @@ def login():
         f"client_id={client_id}&"
         f"response_type=code&"
         f"scope=email+openid+profile&"
-        f"redirect_uri={redirect_uri}"
+        f"redirect_uri={quote(redirect_uri, safe='')}"
     )
     
     # Check for auth code in query params (callback)
@@ -117,15 +117,27 @@ def login():
                 st.rerun()
                 return True
             else:
-                st.error(f"Failed to authenticate: {response.text}")
+                st.error(f"❌ Failed to authenticate with Cognito")
+                st.error(f"Status: {response.status_code}")
+                try:
+                    error_data = response.json()
+                    st.error(f"Error: {error_data.get('error', 'Unknown')}")
+                    st.error(f"Description: {error_data.get('error_description', 'No description')}")
+                except:
+                    st.error(f"Response: {response.text}")
                 return False
                 
         except Exception as e:
-            st.error(f"Authentication error: {str(e)}")
+            st.error(f"❌ Authentication error: {str(e)}")
+            st.info(f"Redirect URI configured: {redirect_uri}")
+            st.info(f"Cognito domain: {domain}")
             return False
             
     # If not authenticated and no code, show login button
     if not st.session_state.get("authenticated", False):
+        # Debug: Show the auth URL being used
+        st.info(f"🔍 Debug: Login URL = {auth_url}")
+        
         st.markdown(
             f"""
             <a href="{auth_url}" target="_self" class="login-button">
