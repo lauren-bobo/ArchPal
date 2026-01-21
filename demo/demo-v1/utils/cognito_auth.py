@@ -5,7 +5,7 @@ import requests
 import base64
 import json
 from datetime import datetime, time
-from datetime import datetime, time
+from urllib.parse import quote
 
 def get_cognito_config():
     """Get Cognito configuration from secrets"""
@@ -60,7 +60,7 @@ def login():
         f"client_id={client_id}&"
         f"response_type=code&"
         f"scope=email+openid+profile&"
-        f"redirect_uri={redirect_uri}"
+        f"redirect_uri={quote(redirect_uri, safe='')}"
     )
     
     # Check for auth code in query params (callback)
@@ -135,6 +135,9 @@ def login():
             
     # If not authenticated and no code, show login button
     if not st.session_state.get("authenticated", False):
+        # Debug: Show the auth URL being used
+        st.info(f"🔍 Debug: Login URL = {auth_url}")
+        
         st.markdown(
             f"""
             <a href="{auth_url}" target="_self" class="login-button">
