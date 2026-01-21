@@ -117,11 +117,20 @@ def login():
                 st.rerun()
                 return True
             else:
-                st.error(f"Failed to authenticate: {response.text}")
+                st.error(f"❌ Failed to authenticate with Cognito")
+                st.error(f"Status: {response.status_code}")
+                try:
+                    error_data = response.json()
+                    st.error(f"Error: {error_data.get('error', 'Unknown')}")
+                    st.error(f"Description: {error_data.get('error_description', 'No description')}")
+                except:
+                    st.error(f"Response: {response.text}")
                 return False
                 
         except Exception as e:
-            st.error(f"Authentication error: {str(e)}")
+            st.error(f"❌ Authentication error: {str(e)}")
+            st.info(f"Redirect URI configured: {redirect_uri}")
+            st.info(f"Cognito domain: {domain}")
             return False
             
     # If not authenticated and no code, show login button
