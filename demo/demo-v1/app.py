@@ -10,7 +10,7 @@ import io
 import csv
 
 # Local imports
-from utils import cognito_auth, data_export
+from utils import cognito_auth, data_export, s3_storage
 
 # Constants
 ICON_PATH = os.path.join(os.path.dirname(__file__), "figs", "icon.jpg")
@@ -41,7 +41,10 @@ def initialize_session_state():
         "data_privacy_acknowledged": False,
         "chat_model": None,
         "chat_model_config": None,
-        "default_system_prompt": None
+        "default_system_prompt": None,
+        "current_conversation_id": None,
+        "conversation_history": [],
+        "s3_user_info_loaded": False
     }
     for key, default_value in defaults.items():
         if key not in st.session_state:
@@ -56,6 +59,28 @@ initialize_session_state()
 # Step 0: Authentication
 if not cognito_auth.login():
     st.stop()
+
+# Step 0.5: Load user info from S3 if available
+cognito_user_id = st.session_state.get("cognito_user_id")
+if cognito_user_id and not st.session_state.get("s3_user_info_loaded"):
+    # Try to load user info from S3
+    user_info = s3_storage.get_user_info(cognito_user_id)
+    if user_info:
+        # User info exists in S3, populate session state
+        st.session_state["student_info"] = {
+            "first_name": user_info.get("first_name", ""),
+            "last_name": user_info.get("last_name", ""),
+            "college_year": user_info.get("college_year", ""),
+            "major": user_info.get("major", ""),
+            "course_number": user_info.get("course_number", ""),
+            "unique_id": user_info.get("unique_identifier", str(uuid.uuid4())),
+            "email": user_info.get("email", st.session_state.get("auth_user", {}).get("email", ""))
+        }
+        st.session_state["s3_user_info_loaded"] = True
+        st.rerun()
+    else:
+        # Mark as checked so we don't keep trying
+        st.session_state["s3_user_info_loaded"] = True
 
 # Step 1: Startup form for student information
 if st.session_state["student_info"] is None:
@@ -72,8 +97,7 @@ if st.session_state["student_info"] is None:
         last_name = st.text_input("Last Name", key="last_name")
         college_year = st.selectbox("College Year", ["First Year", "Second Year", "Upper-Division", "Masters Student", "PhD Student"], key="college_year")
         major = st.text_input("Major", key="major")
-        session_number = st.text_input("Session Number", key="session_number")
-        # Session Password removed - handled by Cognito
+        course_number = st.text_input("Course Number", key="course_number")
         
         submitted = st.form_submit_button("Start Session", use_container_width=True)
 
@@ -82,19 +106,34 @@ if st.session_state["student_info"] is None:
             first_name = first_name.strip() if first_name else first_name
             last_name = last_name.strip() if last_name else last_name
             major = major.strip() if major else major
-            session_number = session_number.strip() if session_number else session_number
+            course_number = course_number.strip() if course_number else course_number
 
-            if first_name and last_name and college_year and major and session_number:
+            if first_name and last_name and college_year and major and course_number:
                 unique_id = str(uuid.uuid4())
-                st.session_state["student_info"] = {
+                student_info_dict = {
                     "first_name": first_name,
                     "last_name": last_name,
                     "college_year": college_year,
                     "major": major,
-                    "session_number": session_number,
+                    "course_number": course_number,
                     "unique_id": unique_id,
                     "email": auth_email
                 }
+                st.session_state["student_info"] = student_info_dict
+                
+                # Save user info to S3
+                if cognito_user_id:
+                    user_info_for_s3 = {
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "college_year": college_year,
+                        "major": major,
+                        "course_number": course_number,
+                        "unique_identifier": unique_id,
+                        "email": auth_email
+                    }
+                    s3_storage.save_user_info(cognito_user_id, user_info_for_s3)
+                
                 st.rerun()
             else:
                 st.error("Please fill in all fields.")
@@ -106,7 +145,7 @@ first_name = student_info["first_name"]
 last_name = student_info["last_name"]
 college_year = student_info["college_year"]
 major = student_info["major"]
-session_number = student_info["session_number"]
+course_number = student_info["course_number"]
 unique_id = student_info["unique_id"]
 
 # Build default system prompt with student context (only if not cached or student info changed)
@@ -293,15 +332,82 @@ with st.sidebar:
 
     st.markdown("### Student Information")
     st.text(f"Name: {first_name} {last_name}")
-    st.text(f"Session: {session_number}")
+    st.text(f"Course: {course_number}")
 
     st.divider()
 
-    st.markdown("### 📋 Demo Instructions")
-    st.markdown("1. ***Using ArchPal***: Type and send your message in the chat input below to get started.")
-    st.markdown("2. **Chat with ArchPal**: Ask questions about your writing project. Provide short sample text when appropriate.")
-    st.markdown("3. **Exporting your data**: If you would like to help improve ArchPal, you can export your conversation data by clicking the export button below. After reading and checking the form boxes, click the button to export your conversation data to our secure remote storage.")
-    st.markdown("4. **Starting a new conversation**: After you have exported your conversation data (if you chose to), you can start a new conversation refreshing the page and begining a new session, adding +1 to the session number.")
+    # Load conversation history from S3
+    if cognito_user_id and not st.session_state.get("conversation_history"):
+        st.session_state["conversation_history"] = s3_storage.get_conversation_history(cognito_user_id, limit=5)
+    
+    # Display conversation history
+    st.markdown("### 💬 Conversation History")
+    conversation_history = st.session_state.get("conversation_history", [])
+    
+    if conversation_history:
+        for conv in conversation_history:
+            conv_id = conv.get("conversation_id")
+            conv_title = conv.get("title", "Untitled Conversation")
+            conv_date = conv.get("last_updated", conv.get("created_at", ""))
+            # Format date for display
+            try:
+                if conv_date:
+                    date_obj = datetime.fromisoformat(conv_date.replace("Z", "+00:00"))
+                    formatted_date = date_obj.strftime("%b %d, %Y %I:%M %p")
+                else:
+                    formatted_date = "Unknown date"
+            except:
+                formatted_date = conv_date[:10] if conv_date else "Unknown"
+            
+            # Create button for each conversation
+            button_label = f"{conv_title}\n{formatted_date}"
+            if st.button(button_label, key=f"conv_{conv_id}", use_container_width=True):
+                # Load conversation
+                conversation_data = s3_storage.get_conversation(cognito_user_id, conv_id)
+                if conversation_data:
+                    # Restore messages
+                    st.session_state["messages"] = []
+                    st.session_state["message_log"] = []
+                    st.session_state["current_conversation_id"] = conv_id
+                    
+                    # Convert stored messages to LangChain format
+                    for msg in conversation_data.get("messages", []):
+                        role = msg.get("role")
+                        content = msg.get("content", "")
+                        if role == "user":
+                            st.session_state["messages"].append(HumanMessage(content=content))
+                            # Rebuild message_log for export compatibility
+                            if len(st.session_state["messages"]) > 0:
+                                # Find corresponding AI message
+                                msg_idx = msg.get("metadata", {}).get("message_index", 0)
+                                if msg_idx + 1 < len(conversation_data.get("messages", [])):
+                                    ai_msg = conversation_data["messages"][msg_idx + 1]
+                                    st.session_state["message_log"].append({
+                                        "userMessage": content,
+                                        "userMessageTime": msg.get("timestamp", ""),
+                                        "AIMessage": ai_msg.get("content", ""),
+                                        "AIMessageTime": ai_msg.get("timestamp", "")
+                                    })
+                        elif role == "assistant":
+                            st.session_state["messages"].append(AIMessage(content=content))
+                    
+                    st.rerun()
+    else:
+        st.info("No previous conversations. Start chatting to create your first conversation!")
+    
+    # New Conversation button
+    if st.button("➕ New Conversation", use_container_width=True, type="primary"):
+        st.session_state["messages"] = []
+        st.session_state["message_log"] = []
+        st.session_state["current_conversation_id"] = None
+        st.rerun()
+    
+    st.divider()
+    
+    st.markdown("### 📋 Instructions")
+    st.markdown("1. **Chat with ArchPal**: Type and send your message to get started.")
+    st.markdown("2. **Resume conversations**: Click on any conversation above to continue.")
+    st.markdown("3. **Export data**: Use the export button below to download your conversation data.")
 
 # Display chat messages
 if "messages" in st.session_state:
@@ -395,6 +501,50 @@ if prompt := st.chat_input():
             "AIMessageTime": ai_timestamp.strftime("%Y-%m-%d %H:%M:%S")
         })
 
+        # Step 2.5: Save to S3
+        if cognito_user_id:
+            # Get or create conversation ID
+            conversation_id = st.session_state.get("current_conversation_id")
+            if not conversation_id:
+                conversation_id = str(uuid.uuid4())
+                st.session_state["current_conversation_id"] = conversation_id
+                # Add to conversation history
+                s3_storage.add_conversation_to_history(cognito_user_id, conversation_id)
+                # Refresh conversation history
+                st.session_state["conversation_history"] = s3_storage.get_conversation_history(cognito_user_id, limit=5)
+            
+            # Append user message
+            s3_storage.append_message_to_conversation(
+                cognito_user_id,
+                conversation_id,
+                "user",
+                prompt,
+                metadata={"course_number": course_number}
+            )
+            
+            # Append AI message
+            s3_storage.append_message_to_conversation(
+                cognito_user_id,
+                conversation_id,
+                "assistant",
+                response.content,
+                metadata={
+                    "model": secrets.get("anthropic_model", "unknown"),
+                    "course_number": course_number
+                }
+            )
+            
+            # Update conversation metadata with student info
+            conversation_data = s3_storage.get_conversation(cognito_user_id, conversation_id)
+            if conversation_data and "metadata" not in conversation_data:
+                conversation_data["metadata"] = {
+                    "unique_identifier": unique_id,
+                    "college_year": college_year,
+                    "major": major,
+                    "course_number": course_number
+                }
+                s3_storage.save_conversation(cognito_user_id, conversation_id, conversation_data)
+
         st.chat_message("assistant", avatar=ICON_PATH).write(response.content)
     except Exception as e:
         st.error(f"Error: {str(e)}")
@@ -405,10 +555,11 @@ st.divider()
 col_export1, col_export2 = st.columns([3, 1])
 
 with col_export1:
-    st.markdown("### 📊 Export Conversation")
+    st.markdown("### 📄 Export Conversation")
+    st.caption("Generate a printable markdown document of your conversation history")
 
 with col_export2:
-    export_clicked = st.button("📥 Export Chat", use_container_width=True, type="primary")
+    export_clicked = st.button("📥 Export & Print", use_container_width=True, type="primary")
 
 if export_clicked:
     if not st.session_state.message_log:
@@ -464,7 +615,7 @@ if st.session_state["show_export_consent"]:
                 st.session_state["show_export_consent"] = False
 
                 # Show loading spinner during export
-                with st.spinner("📤 Exporting your conversation data..."):
+                with st.spinner("📤 Generating your conversation history..."):
                     
                     # Use the new utility function for export
                     export_success = data_export.handle_export(
@@ -472,12 +623,50 @@ if st.session_state["show_export_consent"]:
                         st.session_state["message_log"]
                     )
 
-                # Show result message
+                # Show result message and markdown preview
                 if export_success:
-                    st.success("🎉 Your conversations have been submitted. Thank you for helping improve ArchPal!")
-                    st.balloons()  # Add celebratory balloons
-                    # Keep success message visible for 3 seconds
-                    time.sleep(3)
+                    st.success("✅ Your conversation history has been generated!")
+                    
+                    # Display markdown preview
+                    markdown_content = st.session_state.get("export_markdown", "")
+                    markdown_filename = st.session_state.get("export_markdown_filename", "conversation.md")
+                    
+                    if markdown_content:
+                        st.markdown("---")
+                        st.markdown("### 📄 Your Conversation History")
+                        st.markdown("*Scroll down to view and download your conversation.*")
+                        
+                        # Download button
+                        st.download_button(
+                            label="⬇️ Download Markdown File",
+                            data=markdown_content,
+                            file_name=markdown_filename,
+                            mime="text/markdown",
+                            use_container_width=True,
+                            type="primary"
+                        )
+                        
+                        st.markdown("---")
+                        
+                        # Display markdown preview (printable format)
+                        st.markdown("### Preview (Ready to Print)")
+                        st.markdown(
+                            """
+                            <style>
+                            @media print {
+                                .stApp { visibility: hidden; }
+                                .stApp > div:first-child { visibility: visible; }
+                                .stApp > div:first-child > div:first-child { position: absolute; left: 0; top: 0; width: 100%; }
+                            }
+                            </style>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                        
+                        # Render markdown with print-friendly styling
+                        st.markdown(markdown_content)
+                        
+                        st.info("💡 **Tip:** Use your browser's print function (Ctrl+P / Cmd+P) to print this conversation. The download button above saves a markdown file you can open in any text editor.")
                 else:
                     st.error("❌ Export failed. Please try again or contact support.")
 
