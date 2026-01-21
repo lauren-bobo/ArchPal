@@ -6,8 +6,6 @@ import uuid
 import os
 import time
 from datetime import datetime
-import io
-import csv
 
 # Local imports
 from utils import cognito_auth, data_export
@@ -32,10 +30,6 @@ def initialize_session_state():
         "student_info": None,
         "messages": [],
         "message_log": [],
-        "admin_logged_in": False,
-        "show_admin_login": False,
-        "admin_system_prompt": None,
-        "admin_role": None,
         "show_export_consent": False,
         "consent_signed": False,
         "data_privacy_acknowledged": False,
@@ -131,121 +125,8 @@ if st.session_state["default_system_prompt"] is None:
     )
 default_system_prompt_full = st.session_state["default_system_prompt"]
 
-# Admin login function
-def check_admin_credentials(username, password):
-    """Check if provided credentials match admin credentials from secrets"""
-    secrets = get_secrets()
-    admin_username = secrets['admin_username']
-    admin_password = secrets['admin_password']
-    return username == admin_username and password == admin_password
 
-# Admin login overlay
-def show_admin_login():
-    """Display admin login overlay"""
-    st.markdown("---")
-    st.markdown("### 🔐 Admin Login")
-    st.markdown("Enter your credentials to access admin controls.")
-    with st.form("admin_login_form"):
-        username = st.text_input("Username", key="admin_username_input")
-        password = st.text_input("Password", type="password", key="admin_password_input")
-        col1, col2 = st.columns(2)
-        with col1:
-            login_submitted = st.form_submit_button("Login", use_container_width=True, type="primary")
-        with col2:
-            cancel_submitted = st.form_submit_button("Cancel", use_container_width=True)
 
-        if login_submitted:
-            if check_admin_credentials(username, password):
-                st.session_state["admin_logged_in"] = True
-                st.session_state["show_admin_login"] = False
-                st.rerun()
-            else:
-                st.error("❌ Invalid username or password")
-        if cancel_submitted:
-            st.session_state["show_admin_login"] = False
-            st.rerun()
-    st.markdown("---")
-
-# Admin controls section
-def show_admin_controls():
-    """Display admin-only controls"""
-    st.markdown("### ⚙️ Admin Controls")
-    
-    # Get AWS credentials from secrets
-    secrets = get_secrets()
-    aws_region = secrets.get('aws_region', 'us-east-1')
-    st.info(f"✅ AWS Bedrock configured (Region: {aws_region})")
-    
-    # Simple defaults - admin can customize as needed
-    default_role = "You are ArchPal, UGA's writing-process companion."
-    default_system_prompt = "Guide students through writing process: brainstorm → plan → draft → revise → reflect. Maintain academic integrity."
-    
-    # Use session state values if they exist, otherwise use defaults
-    current_role = st.session_state.get("admin_role", default_role)
-    current_system_prompt = st.session_state.get("admin_system_prompt", default_system_prompt_full)
-    
-    role = st.text_input("Role", key="role_input", value=current_role)
-    system_prompt = st.text_area("System Prompt", value=current_system_prompt,
-        height=100,
-        key="system_prompt_input"
-    )
-    
-    # Submit button to save changes and reinitialize LLM
-    if st.button("💾 Save & Reinitialize LLM", use_container_width=True, type="primary"):
-        # Save to session state
-        st.session_state["admin_role"] = role
-        st.session_state["admin_system_prompt"] = system_prompt
-        
-        # Clear conversation history to reinitialize LLM with new prompt
-        st.session_state["messages"] = []
-        st.session_state["message_log"] = []
-        
-        # Invalidate chat model cache to force recreation with new settings
-        st.session_state["chat_model"] = None
-        st.session_state["chat_model_config"] = None
-        
-        st.success("✅ Settings saved! Conversation history cleared. The LLM will use the new system prompt and role.")
-        st.rerun()
-    
-    st.divider()
-
-    # CSV download section
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("### 📊 Download Configuration")
-        st.markdown("Download the current role and system prompt as a CSV file.")
-
-    with col2:
-        if st.button("📥 Download CSV", use_container_width=True, type="secondary"):
-            # Create CSV with role and system prompt
-            output = io.StringIO()
-            writer = csv.writer(output)
-
-            # Write header row
-            writer.writerow(["Role", "System Prompt"])
-
-            # Write data row
-            writer.writerow([current_role, current_system_prompt])
-
-            csv_string = output.getvalue()
-            output.close()
-
-            # Create download link
-            st.download_button(
-                label="⬇️ Download CSV",
-                data=csv_string,
-                file_name="archpal_config.csv",
-                mime="text/csv",
-                key="download_config_csv"
-            )
-
-    st.divider()
-
-    if st.button("🚪 Admin Logout", use_container_width=True):
-        st.session_state["admin_logged_in"] = False
-        st.rerun()
-    
-    return system_prompt
 
 # Main title
 col1, col2 = st.columns([1, 4])
@@ -255,18 +136,14 @@ with col2:
     st.title("ArchPal: AI Writing Coach")
     st.caption("A small group of interdisciplinary UGA students and instructors are developing ArchPal: a new AI companion to help you plan, research, brainstorm, and create for any writing project! ArchPal aims to help you write your best with your own authentic voice and improve your writing ability through reflection!")
 
-# Handle admin login overlay
-if st.session_state["show_admin_login"] and not st.session_state["admin_logged_in"]:
-    show_admin_login()
 
 # Get secrets
 secrets = get_secrets()
 
-# Use saved admin prompt if available, otherwise use default
-# If admin has set a custom system prompt, it completely replaces the default
-system_prompt = st.session_state.get("admin_system_prompt") or default_system_prompt_full
+# Use default system prompt
+system_prompt = default_system_prompt_full
 
-# Sidebar for admin controls (if logged in) or student info
+# Sidebar for student info
 with st.sidebar:
     # User info and Logout
     if st.session_state.get("authenticated"):
@@ -274,22 +151,8 @@ with st.sidebar:
         st.write(f"Logged in as: **{auth_email}**")
         if st.button("LOGOUT", type="primary", use_container_width=True):
             cognito_auth.logout()
-    
-    st.divider()
-
-    # Admin login/logout button
-    if st.session_state["admin_logged_in"]:
-        if st.button("👤 Admin Panel", use_container_width=True, type="secondary"):
-            st.session_state["show_admin_login"] = False
-    else:
-        if st.button("🔐 Admin Login", use_container_width=True, type="secondary"):
-            st.session_state["show_admin_login"] = True
 
     st.divider()
-
-    if st.session_state["admin_logged_in"]:
-        show_admin_controls()
-        st.divider()
 
     st.markdown("### Student Information")
     st.text(f"Name: {first_name} {last_name}")
