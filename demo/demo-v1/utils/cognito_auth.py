@@ -138,13 +138,20 @@ def login():
         st.markdown("### 🔐 Login Required")
         st.markdown("Please log in with your UGA credentials to continue.")
         
-        # Use native Streamlit link button instead of HTML
+        # Method 1: Use native Streamlit link button
         st.link_button(
             "🔑 Login with UGA Account",
             auth_url,
             type="primary",
             use_container_width=True
         )
+        
+        # Method 2: JavaScript redirect as fallback (in case link_button has issues)
+        st.markdown("---")
+        st.markdown("*If the button above doesn't work, click below:*")
+        if st.button("🔄 Alternative Login Method", use_container_width=True):
+            st.markdown(f'<meta http-equiv="refresh" content="0;url={auth_url}">', unsafe_allow_html=True)
+        
         return False
         
     return True
@@ -168,12 +175,20 @@ def logout():
     # clear all query params
     st.query_params.clear()
     
-    # Construct logout URL
+    # Construct logout URL with proper URL encoding
     logout_url = (
         f"https://{domain}/logout?"
         f"client_id={client_id}&"
-        f"logout_uri={redirect_uri}"
+        f"logout_uri={quote(redirect_uri, safe='')}"
     )
     
-    # Redirect to Cognito logout
-    st.markdown(f'<meta http-equiv="refresh" content="0;url={logout_url}">', unsafe_allow_html=True)
+    # Use JavaScript window.location for redirect (more reliable than meta refresh)
+    st.markdown(
+        f"""
+        <script>
+            window.location.href = "{logout_url}";
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
+    st.rerun()
