@@ -138,8 +138,18 @@ def login():
         st.markdown("### 🔐 Login Required")
         st.markdown("Please log in with your UGA credentials to continue.")
         
-        # Use button with JavaScript redirect
-        if st.button("🔑 Login with UGA Account", type="primary", use_container_width=True):
+        # Method 1: Use native Streamlit link button
+        st.link_button(
+            "🔑 Login with UGA Account",
+            auth_url,
+            type="primary",
+            use_container_width=True
+        )
+        
+        # Method 2: JavaScript redirect as fallback (in case link_button has issues)
+        st.markdown("---")
+        st.markdown("*If the button above doesn't work, click below:*")
+        if st.button("🔄 Alternative Login Method", use_container_width=True):
             st.markdown(f'<meta http-equiv="refresh" content="0;url={auth_url}">', unsafe_allow_html=True)
         
         return False
