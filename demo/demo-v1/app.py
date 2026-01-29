@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1
 from langchain_aws import ChatBedrock
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 import boto3
@@ -429,7 +430,7 @@ col_export1, col_export2 = st.columns([3, 1])
 
 with col_export1:
     st.markdown("### 📄 Export Conversation")
-    st.caption("Generate a printable markdown document of your conversation history")
+    st.caption("Download your conversation as a PDF or print it directly")
 
 with col_export2:
     export_clicked = st.button("📥 Export & Print", use_container_width=True, type="primary")
@@ -439,55 +440,72 @@ if export_clicked:
         st.warning("No conversation to export yet.")
     else:
         # Show loading spinner during export
-        with st.spinner("📤 Generating your conversation history..."):
+        with st.spinner("📤 Generating your PDF..."):
             # Use the utility function for export
             export_success = data_export.handle_export(
                 st.session_state["student_info"],
                 st.session_state["message_log"]
             )
 
-        # Show result message and markdown preview
+        # Show result message and download options
         if export_success:
-            st.success("✅ Your conversation history has been generated!")
-            
-            # Display markdown preview
+            pdf_content = st.session_state.get("export_pdf", b"")
+            pdf_filename = st.session_state.get("export_pdf_filename", "conversation.pdf")
             markdown_content = st.session_state.get("export_markdown", "")
-            markdown_filename = st.session_state.get("export_markdown_filename", "conversation.md")
             
-            if markdown_content:
-                st.markdown("---")
-                st.markdown("### 📄 Your Conversation History")
-                
-                # Download button - this is the "automatic" part, as prominent as possible
+            # Success message with file info
+            st.success(f"✅ Your conversation is ready!")
+            st.info(f"📁 **File:** `{pdf_filename}`")
+            
+            # Download and Print buttons side by side
+            col_download, col_print = st.columns(2)
+            
+            with col_download:
                 st.download_button(
-                    label="⬇️ Download Markdown File",
-                    data=markdown_content,
-                    file_name=markdown_filename,
-                    mime="text/markdown",
+                    label="⬇️ Download PDF",
+                    data=pdf_content,
+                    file_name=pdf_filename,
+                    mime="application/pdf",
                     use_container_width=True,
                     type="primary"
                 )
-                
-                st.markdown("---")
-                
-                # Display markdown preview (printable format)
-                st.markdown("### Preview (Ready to Print)")
-                st.markdown(
-                    """
-                    <style>
-                    @media print {
-                        .stApp { visibility: hidden; }
-                        .stApp > div:first-child { visibility: visible; }
-                        .stApp > div:first-child > div:first-child { position: absolute; left: 0; top: 0; width: 100%; }
-                    }
-                    </style>
-                    """,
-                    unsafe_allow_html=True
-                )
-                
-                # Render markdown with print-friendly styling
+            
+            with col_print:
+                # JavaScript print button using HTML component
+                print_button_html = """
+                <style>
+                .print-btn {
+                    background-color: #262730;
+                    color: white;
+                    padding: 0.5rem 1rem;
+                    border: 1px solid rgba(250, 250, 250, 0.2);
+                    border-radius: 0.5rem;
+                    cursor: pointer;
+                    font-size: 1rem;
+                    width: 100%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 0.5rem;
+                    transition: background-color 0.2s, border-color 0.2s;
+                }
+                .print-btn:hover {
+                    background-color: #3d3d4d;
+                    border-color: rgba(250, 250, 250, 0.4);
+                }
+                </style>
+                <button class="print-btn" onclick="window.print()">
+                    🖨️ Print Page
+                </button>
+                """
+                st.components.v1.html(print_button_html, height=50)
+            
+            st.markdown("---")
+            
+            # Auto-expanded preview
+            with st.expander("📄 Preview Conversation", expanded=True):
                 st.markdown(markdown_content)
-                
-                st.info("💡 **Tip:** Use your browser's print function (Ctrl+P / Cmd+P) to print this conversation. The download button above saves a markdown file you can open in any text editor.")
+            
+            st.caption("💡 **Tip:** Click 'Download PDF' to save the file, or 'Print Page' to print directly from your browser.")
         else:
             st.error("❌ Export failed. Please try again or contact support.")

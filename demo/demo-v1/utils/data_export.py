@@ -2,6 +2,7 @@ import streamlit as st
 import io
 import csv
 from datetime import datetime
+from fpdf import FPDF
 
 # --- Constants & Config ---
 
@@ -70,6 +71,146 @@ def create_identifier_csv(first_name, last_name, unique_id):
     return csv_string
 
 # --- Markdown Generation ---
+
+# --- PDF Generation ---
+
+def create_pdf_conversation(student_info, message_log):
+    """
+    Create a PDF-formatted conversation history
+    
+    Args:
+        student_info: Dictionary with student information
+        message_log: List of message dictionaries with userMessage, AIMessage, and timestamps
+    
+    Returns:
+        PDF bytes ready for download
+    """
+    first_name = student_info.get("first_name", "")
+    last_name = student_info.get("last_name", "")
+    college_year = student_info.get("college_year", "")
+    major = student_info.get("major", "")
+    course_number = student_info.get("course_number", "")
+    
+    # Format current date/time for header
+    current_date = datetime.now().strftime("%B %d, %Y at %I:%M %p")
+    
+    # Create PDF
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    
+    # Title
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.set_text_color(139, 0, 0)  # Dark red (UGA colors)
+    pdf.cell(0, 15, "ArchPal Conversation History", ln=True, align="C")
+    
+    # Subtitle
+    pdf.set_font("Helvetica", "I", 10)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 8, "UGA's AI Writing Coach", ln=True, align="C")
+    
+    # Divider line
+    pdf.set_draw_color(139, 0, 0)
+    pdf.line(20, pdf.get_y() + 2, 190, pdf.get_y() + 2)
+    pdf.ln(10)
+    
+    # Student Information Section
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(0, 10, "Student Information", ln=True)
+    
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 7, f"Name: {first_name} {last_name}", ln=True)
+    pdf.cell(0, 7, f"College Year: {college_year}", ln=True)
+    pdf.cell(0, 7, f"Major: {major}", ln=True)
+    pdf.cell(0, 7, f"Course Number: {course_number}", ln=True)
+    pdf.cell(0, 7, f"Export Date: {current_date}", ln=True)
+    
+    pdf.ln(5)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(8)
+    
+    # Conversation Section
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, "Conversation", ln=True)
+    
+    if not message_log:
+        pdf.set_font("Helvetica", "I", 11)
+        pdf.cell(0, 10, "No messages in this conversation.", ln=True)
+    else:
+        for idx, entry in enumerate(message_log, 1):
+            user_message = entry.get("userMessage", "")
+            ai_message = entry.get("AIMessage", "")
+            user_time = entry.get("userMessageTime", "")
+            ai_time = entry.get("AIMessageTime", "")
+            
+            # Format timestamps
+            try:
+                if user_time:
+                    user_dt = datetime.strptime(user_time, "%Y-%m-%d %H:%M:%S")
+                    formatted_user_time = user_dt.strftime("%I:%M %p")
+                else:
+                    formatted_user_time = ""
+            except:
+                formatted_user_time = user_time
+            
+            try:
+                if ai_time:
+                    ai_dt = datetime.strptime(ai_time, "%Y-%m-%d %H:%M:%S")
+                    formatted_ai_time = ai_dt.strftime("%I:%M %p")
+                else:
+                    formatted_ai_time = ""
+            except:
+                formatted_ai_time = ai_time
+            
+            # Exchange header
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.set_text_color(50, 50, 50)
+            pdf.cell(0, 10, f"Exchange {idx}", ln=True)
+            
+            # User message
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.set_text_color(0, 100, 0)  # Dark green for user
+            pdf.cell(0, 7, f"You ({formatted_user_time})", ln=True)
+            
+            pdf.set_font("Helvetica", "", 10)
+            pdf.set_text_color(0, 0, 0)
+            # Handle multi-line user message
+            pdf.multi_cell(0, 6, user_message.encode('latin-1', 'replace').decode('latin-1'))
+            pdf.ln(3)
+            
+            # AI message
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.set_text_color(139, 0, 0)  # Dark red for ArchPal
+            pdf.cell(0, 7, f"ArchPal ({formatted_ai_time})", ln=True)
+            
+            pdf.set_font("Helvetica", "", 10)
+            pdf.set_text_color(0, 0, 0)
+            # Handle multi-line AI message
+            pdf.multi_cell(0, 6, ai_message.encode('latin-1', 'replace').decode('latin-1'))
+            pdf.ln(5)
+            
+            # Divider between exchanges
+            if idx < len(message_log):
+                pdf.set_draw_color(200, 200, 200)
+                pdf.line(30, pdf.get_y(), 180, pdf.get_y())
+                pdf.ln(5)
+    
+    # Footer
+    pdf.ln(10)
+    pdf.set_draw_color(139, 0, 0)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(5)
+    
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 6, "This conversation was exported from ArchPal, UGA's AI Writing Coach.", ln=True, align="C")
+    pdf.cell(0, 6, f"Generated on {current_date}", ln=True, align="C")
+    
+    # Return PDF as bytes (convert from bytearray for Streamlit compatibility)
+    return bytes(pdf.output())
+
+
 
 def create_markdown_conversation(student_info, message_log):
     """
@@ -180,10 +321,10 @@ def create_markdown_conversation(student_info, message_log):
 
 def handle_export(student_info, message_log):
     """
-    Generate markdown-formatted conversation history for printing
+    Generate PDF and markdown-formatted conversation history for download/print
     
     Note: Conversations are automatically saved to S3 during chat.
-    This function generates a printable markdown document.
+    This function generates downloadable PDF and printable markdown.
     
     Args:
         student_info: Dictionary with student information
@@ -197,12 +338,16 @@ def handle_export(student_info, message_log):
     course_number = student_info.get("course_number", "")
     
     try:
-        # Generate markdown conversation history
-        markdown_content = create_markdown_conversation(student_info, message_log)
-        
-        # Store markdown in session state for download/display
         # Use course number in filename if available, otherwise use unique_id
         filename_course = course_number.replace(" ", "_") if course_number else unique_id[:8]
+        
+        # Generate PDF conversation history
+        pdf_content = create_pdf_conversation(student_info, message_log)
+        st.session_state["export_pdf"] = pdf_content
+        st.session_state["export_pdf_filename"] = f"ArchPal_Conversation_{filename_course}.pdf"
+        
+        # Generate markdown conversation history (for preview)
+        markdown_content = create_markdown_conversation(student_info, message_log)
         st.session_state["export_markdown"] = markdown_content
         st.session_state["export_markdown_filename"] = f"ArchPal_Conversation_{filename_course}.md"
         

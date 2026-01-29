@@ -4,22 +4,56 @@ import jwt
 import requests
 import base64
 import json
+import toml
 from datetime import datetime, time
 from urllib.parse import quote
+
+# Cache for secrets loaded from parent directory
+_parent_secrets = None
+
+def _load_parent_secrets():
+    """Load secrets from parent .streamlit directory if available"""
+    global _parent_secrets
+    if _parent_secrets is not None:
+        return _parent_secrets
+    
+    # Try parent directories for .streamlit/secrets.toml
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    for _ in range(5):  # Check up to 5 levels up
+        parent_dir = os.path.dirname(current_dir)
+        secrets_path = os.path.join(parent_dir, ".streamlit", "secrets.toml")
+        if os.path.exists(secrets_path):
+            try:
+                _parent_secrets = toml.load(secrets_path)
+                return _parent_secrets
+            except Exception:
+                pass
+        current_dir = parent_dir
+    
+    _parent_secrets = {}
+    return _parent_secrets
+
+def _get_secret(key, default=None):
+    """Get secret from st.secrets or parent directory secrets"""
+    try:
+        return st.secrets[key]
+    except Exception:
+        parent_secrets = _load_parent_secrets()
+        return parent_secrets.get(key, default)
 
 def get_cognito_config():
     """Get Cognito configuration from secrets"""
     try:
-        if "cognito_user_pool_id" not in st.secrets:
-            # Fallback for dev/testing if secrets not set up
+        pool_id = _get_secret("cognito_user_pool_id")
+        if not pool_id:
             return None
             
         return {
-            "pool_id": st.secrets["cognito_user_pool_id"],
-            "app_client_id": st.secrets["cognito_client_id"],
-            "domain": st.secrets["cognito_domain"],
-            "region": st.secrets["cognito_region"],
-            "redirect_uri": st.secrets["cognito_redirect_uri"]
+            "pool_id": pool_id,
+            "app_client_id": _get_secret("cognito_client_id"),
+            "domain": _get_secret("cognito_domain"),
+            "region": _get_secret("cognito_region"),
+            "redirect_uri": _get_secret("cognito_redirect_uri")
         }
     except Exception as e:
         st.error(f"Error loading Cognito configuration: {str(e)}")
