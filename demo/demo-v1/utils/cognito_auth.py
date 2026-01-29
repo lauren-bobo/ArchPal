@@ -35,7 +35,8 @@ def init_auth_state():
         "authenticated": False,
         "auth_token": None,
         "auth_user": None,
-        "token_id": None
+        "token_id": None,
+        "cognito_user_id": None
     }
     
     for key, value in defaults.items():
@@ -103,13 +104,19 @@ def login():
                     st.error("Only @uga.edu email addresses are allowed.")
                     return False
                 
+                # Extract Cognito user ID (sub claim) - this is the permanent unique identifier
+                # The 'sub' claim is a UUID that uniquely identifies the user in Cognito
+                cognito_user_id = decoded.get("sub")
+                
                 # Update session state
                 st.session_state["authenticated"] = True
                 st.session_state["auth_token"] = access_token
                 st.session_state["token_id"] = id_token
+                st.session_state["cognito_user_id"] = cognito_user_id
                 st.session_state["auth_user"] = {
                     "email": email,
-                    "username": decoded.get("cognito:username", email)
+                    "username": decoded.get("cognito:username", email),
+                    "cognito_user_id": cognito_user_id
                 }
                 
                 # Clear query params to hide code
