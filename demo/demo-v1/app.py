@@ -36,9 +36,6 @@ def initialize_session_state():
         "show_admin_login": False,
         "admin_system_prompt": None,
         "admin_role": None,
-        "show_export_consent": False,
-        "consent_signed": False,
-        "data_privacy_acknowledged": False,
         "chat_model": None,
         "chat_model_config": None,
         "default_system_prompt": None,
@@ -400,6 +397,9 @@ with st.sidebar:
         st.session_state["messages"] = []
         st.session_state["message_log"] = []
         st.session_state["current_conversation_id"] = None
+        # Refresh conversation history from S3
+        if cognito_user_id:
+            st.session_state["conversation_history"] = s3_storage.get_conversation_history(cognito_user_id, limit=5)
         st.rerun()
     
     st.divider()
@@ -508,8 +508,12 @@ if prompt := st.chat_input():
             if not conversation_id:
                 conversation_id = str(uuid.uuid4())
                 st.session_state["current_conversation_id"] = conversation_id
+                
+                # Use current time for conversation title
+                conv_title = datetime.now().strftime("%b %d, %Y %I:%M %p")
+                
                 # Add to conversation history
-                s3_storage.add_conversation_to_history(cognito_user_id, conversation_id)
+                s3_storage.add_conversation_to_history(cognito_user_id, conversation_id, title=conv_title)
                 # Refresh conversation history
                 st.session_state["conversation_history"] = s3_storage.get_conversation_history(cognito_user_id, limit=5)
             
@@ -533,6 +537,9 @@ if prompt := st.chat_input():
                     "course_number": course_number
                 }
             )
+            
+            # Refresh conversation history to update last_updated time in sidebar
+            st.session_state["conversation_history"] = s3_storage.get_conversation_history(cognito_user_id, limit=5)
             
             # Update conversation metadata with student info
             conversation_data = s3_storage.get_conversation(cognito_user_id, conversation_id)
@@ -565,113 +572,56 @@ if export_clicked:
     if not st.session_state.message_log:
         st.warning("No conversation to export yet.")
     else:
-        # Show consent modal instead of immediately exporting
-        st.session_state["show_export_consent"] = True
-        st.rerun()
+        # Show loading spinner during export
+        with st.spinner("📤 Generating your conversation history..."):
+            # Use the utility function for export
+            export_success = data_export.handle_export(
+                st.session_state["student_info"],
+                st.session_state["message_log"]
+            )
 
-# Export Consent Modal
-if st.session_state["show_export_consent"]:
-    with st.container():
-        st.markdown("---")
-        st.markdown("### 📋 Export Consent & Privacy Agreement")
-        st.markdown("Before exporting your conversation data, please review and confirm the following:")
-
-        # Checkbox 1: Consent form authorization
-        consent_signed = st.checkbox(
-            "I have signed and authorized the consent form",
-            key="consent_checkbox_modal",
-            value=st.session_state.get("consent_signed", False)
-        )
-
-        # Checkbox 2: Data privacy acknowledgment
-        privacy_acknowledged = st.checkbox(
-            "We want you to trust that we care about your privacy and anonimity while helping archpal improve. I understand my conversation data will be stored in two separate secure locations: one with my raw conversation data (including my name) for matching with the consent form, and one with anonymized data (names replaced with [NAME]) for research and improvements. I understand that only the anonomized data will be viewed or used for research purposes.",
-            key="privacy_checkbox_modal",
-            value=st.session_state.get("data_privacy_acknowledged", False)
-        )
-
-        st.markdown("---")
-
-        # Export button only enabled when both checkboxes are checked
-        export_enabled = consent_signed and privacy_acknowledged
-        export_button_text = "✅ Proceed with Export" if export_enabled else "✅ Proceed with Export (Check boxes above to enable)"
-
-        col1, col2 = st.columns([1, 1])
-
-        with col1:
-            if st.button("❌ Cancel", use_container_width=True, type="secondary"):
-                st.session_state["show_export_consent"] = False
-                st.session_state["consent_signed"] = False
-                st.session_state["data_privacy_acknowledged"] = False
-                st.rerun()
-
-        with col2:
-            if st.button(export_button_text, use_container_width=True, type="primary", disabled=not export_enabled):
-                # Update session state with checkbox values
-                st.session_state["consent_signed"] = consent_signed
-                st.session_state["data_privacy_acknowledged"] = privacy_acknowledged
-
-                # Close modal and show loading
-                st.session_state["show_export_consent"] = False
-
-                # Show loading spinner during export
-                with st.spinner("📤 Generating your conversation history..."):
-                    
-                    # Use the new utility function for export
-                    export_success = data_export.handle_export(
-                        st.session_state["student_info"],
-                        st.session_state["message_log"]
-                    )
-
-                # Show result message and markdown preview
-                if export_success:
-                    st.success("✅ Your conversation history has been generated!")
-                    
-                    # Display markdown preview
-                    markdown_content = st.session_state.get("export_markdown", "")
-                    markdown_filename = st.session_state.get("export_markdown_filename", "conversation.md")
-                    
-                    if markdown_content:
-                        st.markdown("---")
-                        st.markdown("### 📄 Your Conversation History")
-                        st.markdown("*Scroll down to view and download your conversation.*")
-                        
-                        # Download button
-                        st.download_button(
-                            label="⬇️ Download Markdown File",
-                            data=markdown_content,
-                            file_name=markdown_filename,
-                            mime="text/markdown",
-                            use_container_width=True,
-                            type="primary"
-                        )
-                        
-                        st.markdown("---")
-                        
-                        # Display markdown preview (printable format)
-                        st.markdown("### Preview (Ready to Print)")
-                        st.markdown(
-                            """
-                            <style>
-                            @media print {
-                                .stApp { visibility: hidden; }
-                                .stApp > div:first-child { visibility: visible; }
-                                .stApp > div:first-child > div:first-child { position: absolute; left: 0; top: 0; width: 100%; }
-                            }
-                            </style>
-                            """,
-                            unsafe_allow_html=True
-                        )
-                        
-                        # Render markdown with print-friendly styling
-                        st.markdown(markdown_content)
-                        
-                        st.info("💡 **Tip:** Use your browser's print function (Ctrl+P / Cmd+P) to print this conversation. The download button above saves a markdown file you can open in any text editor.")
-                else:
-                    st.error("❌ Export failed. Please try again or contact support.")
-
-                # Reset checkbox states after export attempt
-                st.session_state["consent_signed"] = False
-                st.session_state["data_privacy_acknowledged"] = False
-
-                st.rerun()
+        # Show result message and markdown preview
+        if export_success:
+            st.success("✅ Your conversation history has been generated!")
+            
+            # Display markdown preview
+            markdown_content = st.session_state.get("export_markdown", "")
+            markdown_filename = st.session_state.get("export_markdown_filename", "conversation.md")
+            
+            if markdown_content:
+                st.markdown("---")
+                st.markdown("### 📄 Your Conversation History")
+                
+                # Download button - this is the "automatic" part, as prominent as possible
+                st.download_button(
+                    label="⬇️ Download Markdown File",
+                    data=markdown_content,
+                    file_name=markdown_filename,
+                    mime="text/markdown",
+                    use_container_width=True,
+                    type="primary"
+                )
+                
+                st.markdown("---")
+                
+                # Display markdown preview (printable format)
+                st.markdown("### Preview (Ready to Print)")
+                st.markdown(
+                    """
+                    <style>
+                    @media print {
+                        .stApp { visibility: hidden; }
+                        .stApp > div:first-child { visibility: visible; }
+                        .stApp > div:first-child > div:first-child { position: absolute; left: 0; top: 0; width: 100%; }
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True
+                )
+                
+                # Render markdown with print-friendly styling
+                st.markdown(markdown_content)
+                
+                st.info("💡 **Tip:** Use your browser's print function (Ctrl+P / Cmd+P) to print this conversation. The download button above saves a markdown file you can open in any text editor.")
+        else:
+            st.error("❌ Export failed. Please try again or contact support.")
