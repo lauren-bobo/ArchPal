@@ -169,34 +169,111 @@ default_system_prompt_full = st.session_state["default_system_prompt"]
 
 
 # Main title
-col1, col2 = st.columns([1, 4])
-with col1:
-    st.image(LOGO_PATH, width=120)
+col1, col2, col3 = st.columns([3, 2, 3])
 with col2:
-    st.title("ArchPal: AI Writing Coach")
-    st.caption("A small group of interdisciplinary UGA students and instructors are developing ArchPal: a new AI companion to help you plan, research, brainstorm, and create for any writing project! ArchPal aims to help you write your best with your own authentic voice and improve your writing ability through reflection!")
+    st.image(LOGO_PATH, width=100)
+# with col2:
+#     st.title("ArchPal: AI Writing Coach")
+#     st.caption("A small group of interdisciplinary UGA students and instructors are developing ArchPal: a new AI companion to help you plan, research, brainstorm, and create for any writing project! ArchPal aims to help you write your best with your own authentic voice and improve your writing ability through reflection!")
 
+st.divider()
 
+st.markdown("### 📋 Instructions")
+st.markdown("1. **Chat with ArchPal**: Type and send your message to get started.")
+st.markdown("2. **Resume conversations**: Click on any conversation above to continue.")
+st.markdown("3. **Export data**: Use the export button below to download your conversation data.")
+
+st.divider()
 # Get secrets
 secrets = get_secrets()
 
 # Use default system prompt
 system_prompt = default_system_prompt_full
 
-# Sidebar for student info
+# Sidebar
 with st.sidebar:
+    st.markdown("""
+    <style>
+    /* Reduce spacing around dividers in sidebar */
+    [data-testid="stSidebar"] hr {
+        margin-top: 0.5rem;
+        margin-bottom: 0.5rem;
+    }    
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="sidebar-header">', unsafe_allow_html=True)
+    
+    #logo and title
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.image(LOGO_PATH, width=70)
+
+    st.markdown("### ArchPal: AI Writing Coach")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.divider()
+
+    #Student info
+    st.markdown("### Student Information")
+    st.text(f"Name: {first_name} {last_name}")
+    st.text(f"Course: {course_number}")
+
+    st.divider()
+
     # User info and Logout
     if st.session_state.get("authenticated"):
         auth_email = st.session_state.get("auth_user", {}).get("email", "User")
         st.write(f"Logged in as: **{auth_email}**")
-        if st.button("LOGOUT", type="primary", use_container_width=True):
+        if st.button("Logout", type="primary", use_container_width=True):
             cognito_auth.logout()
+
+    # export_clicked = st.button("📥 Export", key="top_export", type="secondary", use_container_width=True)
+    # if export_clicked:
+    #             if not st.session_state.message_log:
+    #                 st.warning("No conversation to export yet.")
+    #             else:
+    #                 # Use the utility function for export
+    #                 with st.spinner("📤 Generating your PDF..."):
+    #                     export_success = data_export.handle_export(
+    #                         st.session_state["student_info"],
+    #                         st.session_state["message_log"]
+    #                     )
+    #                 if export_success:
+    #                     st.session_state["show_export_results"] = True
+    #                     st.rerun()
 
     st.divider()
 
-    st.markdown("### Student Information")
-    st.text(f"Name: {first_name} {last_name}")
-    st.text(f"Course: {course_number}")
+    #Export button
+    st.markdown("### 📄 Export Conversation")
+    st.caption("Download your conversation as a PDF")
+
+    export_clicked = st.button("📥 Export", use_container_width=True, type="primary")
+    
+    if export_clicked:
+        if not st.session_state.message_log:
+            st.warning("No conversation to export yet.")
+            
+        else:
+            # Show loading spinner during export
+            with st.spinner("📤 Generating your PDF..."):
+                # Use the utility function for export
+                export_success = data_export.handle_export(
+                    st.session_state["student_info"],
+                    st.session_state["message_log"]
+                )
+                
+            # Show result message and download options
+            if export_success:
+                st.session_state["show_export_results"] = True
+                st.rerun()
+                # pdf_content = st.session_state.get("export_pdf", b"")
+                # pdf_filename = st.session_state.get("export_pdf_filename", "conversation.pdf")
+                # markdown_content = st.session_state.get("export_markdown", "")
+            
+            else:
+                st.error("❌ Export failed. Please try again or contact support.")
 
     st.divider()
 
@@ -204,6 +281,16 @@ with st.sidebar:
     if cognito_user_id and not st.session_state.get("conversation_history"):
         st.session_state["conversation_history"] = s3_storage.get_conversation_history(cognito_user_id, limit=5)
     
+    # New Conversation button
+    if st.button("➕ New Conversation", use_container_width=True, type="primary"):
+        st.session_state["messages"] = []
+        st.session_state["message_log"] = []
+        st.session_state["current_conversation_id"] = None
+        # Refresh conversation history from S3
+        if cognito_user_id:
+            st.session_state["conversation_history"] = s3_storage.get_conversation_history(cognito_user_id, limit=5)
+        st.rerun()
+
     # Display conversation history
     st.markdown("### 💬 Conversation History")
     conversation_history = st.session_state.get("conversation_history", [])
@@ -260,21 +347,21 @@ with st.sidebar:
         st.info("No previous conversations. Start chatting to create your first conversation!")
     
     # New Conversation button
-    if st.button("➕ New Conversation", use_container_width=True, type="primary"):
-        st.session_state["messages"] = []
-        st.session_state["message_log"] = []
-        st.session_state["current_conversation_id"] = None
-        # Refresh conversation history from S3
-        if cognito_user_id:
-            st.session_state["conversation_history"] = s3_storage.get_conversation_history(cognito_user_id, limit=5)
-        st.rerun()
+    # if st.button("➕ New Conversation", use_container_width=True, type="primary"):
+    #     st.session_state["messages"] = []
+    #     st.session_state["message_log"] = []
+    #     st.session_state["current_conversation_id"] = None
+    #     # Refresh conversation history from S3
+    #     if cognito_user_id:
+    #         st.session_state["conversation_history"] = s3_storage.get_conversation_history(cognito_user_id, limit=5)
+    #     st.rerun()
     
-    st.divider()
+    # st.divider()
     
-    st.markdown("### 📋 Instructions")
-    st.markdown("1. **Chat with ArchPal**: Type and send your message to get started.")
-    st.markdown("2. **Resume conversations**: Click on any conversation above to continue.")
-    st.markdown("3. **Export data**: Use the export button below to download your conversation data.")
+    # st.markdown("### 📋 Instructions")
+    # st.markdown("1. **Chat with ArchPal**: Type and send your message to get started.")
+    # st.markdown("2. **Resume conversations**: Click on any conversation above to continue.")
+    # st.markdown("3. **Export data**: Use the export button below to download your conversation data.")
 
 # Display chat messages
 if "messages" in st.session_state:
@@ -424,88 +511,157 @@ if prompt := st.chat_input():
         st.error(f"Error: {str(e)}")
         st.stop()
 
+# Display export results if triggered
+if st.session_state.get("show_export_results", False):
+    st.divider()
+    
+    pdf_content = st.session_state.get("export_pdf", b"")
+    pdf_filename = st.session_state.get("export_pdf_filename", "conversation.pdf")
+    markdown_content = st.session_state.get("export_markdown", "")
+    
+    # Success message with file info
+    st.success(f"✅ Your conversation is ready!")
+    st.info(f"📁 **File:** `{pdf_filename}`")
+    
+    # Download and Print buttons side by side
+    # col_download, col_print, col_close = st.columns([2, 2, 1])
+    col_download, col_close = st.columns([2, 2])
+
+    with col_download:
+        st.download_button(
+            label="⬇️ Download PDF",
+            data=pdf_content,
+            file_name=pdf_filename,
+            mime="application/pdf",
+            use_container_width=True,
+            type="primary"
+        )
+    
+    # with col_print:
+    #     # JavaScript print button using HTML component
+    #     print_button_html = """
+    #     <style>
+    #     .print-btn {
+    #         background-color: #262730;
+    #         color: white;
+    #         padding: 0.5rem 1rem;
+    #         border: 1px solid rgba(250, 250, 250, 0.2);
+    #         border-radius: 0.5rem;
+    #         cursor: pointer;
+    #         font-size: 1rem;
+    #         width: 100%;
+    #         display: flex;
+    #         align-items: center;
+    #         justify-content: center;
+    #         gap: 0.5rem;
+    #         transition: background-color 0.2s, border-color 0.2s;
+    #     }
+    #     .print-btn:hover {
+    #         background-color: #3d3d4d;
+    #         border-color: rgba(250, 250, 250, 0.4);
+    #     }
+    #     </style>
+    #     <button class="print-btn" onclick="window.print()">
+    #         🖨️ Print Page
+    #     </button>
+    #     """
+    #     st.components.v1.html(print_button_html, height=50)
+    
+    with col_close:
+        if st.button("✖️ Close", key="close_export", use_container_width=True):
+            st.session_state["show_export_results"] = False
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # Auto-expanded preview
+    with st.expander("📄 Preview Conversation", expanded=True):
+        st.markdown(markdown_content)
+    
+    st.caption("💡 **Tip:** Click 'Download PDF' to save the file.")
+    
 # Step 3: Export button
-st.divider()
-col_export1, col_export2 = st.columns([3, 1])
+# st.divider()
+# col_export1, col_export2 = st.columns([3, 1])
 
-with col_export1:
-    st.markdown("### 📄 Export Conversation")
-    st.caption("Download your conversation as a PDF or print it directly")
+# with col_export1:
+#     st.markdown("### 📄 Export Conversation")
+#     st.caption("Download your conversation as a PDF or print it directly")
 
-with col_export2:
-    export_clicked = st.button("📥 Export & Print", use_container_width=True, type="primary")
+# with col_export2:
+#     export_clicked = st.button("📥 Export & Print", use_container_width=True, type="primary")
 
-if export_clicked:
-    if not st.session_state.message_log:
-        st.warning("No conversation to export yet.")
-    else:
-        # Show loading spinner during export
-        with st.spinner("📤 Generating your PDF..."):
-            # Use the utility function for export
-            export_success = data_export.handle_export(
-                st.session_state["student_info"],
-                st.session_state["message_log"]
-            )
+# if export_clicked:
+#     if not st.session_state.message_log:
+#         st.warning("No conversation to export yet.")
+#     else:
+#         # Show loading spinner during export
+#         with st.spinner("📤 Generating your PDF..."):
+#             # Use the utility function for export
+#             export_success = data_export.handle_export(
+#                 st.session_state["student_info"],
+#                 st.session_state["message_log"]
+#             )
 
-        # Show result message and download options
-        if export_success:
-            pdf_content = st.session_state.get("export_pdf", b"")
-            pdf_filename = st.session_state.get("export_pdf_filename", "conversation.pdf")
-            markdown_content = st.session_state.get("export_markdown", "")
+#         # Show result message and download options
+#         if export_success:
+#             pdf_content = st.session_state.get("export_pdf", b"")
+#             pdf_filename = st.session_state.get("export_pdf_filename", "conversation.pdf")
+#             markdown_content = st.session_state.get("export_markdown", "")
             
-            # Success message with file info
-            st.success(f"✅ Your conversation is ready!")
-            st.info(f"📁 **File:** `{pdf_filename}`")
+#             # Success message with file info
+#             st.success(f"✅ Your conversation is ready!")
+#             st.info(f"📁 **File:** `{pdf_filename}`")
             
-            # Download and Print buttons side by side
-            col_download, col_print = st.columns(2)
+#             # Download and Print buttons side by side
+#             col_download, col_print = st.columns(2)
             
-            with col_download:
-                st.download_button(
-                    label="⬇️ Download PDF",
-                    data=pdf_content,
-                    file_name=pdf_filename,
-                    mime="application/pdf",
-                    use_container_width=True,
-                    type="primary"
-                )
+#             with col_download:
+#                 st.download_button(
+#                     label="⬇️ Download PDF",
+#                     data=pdf_content,
+#                     file_name=pdf_filename,
+#                     mime="application/pdf",
+#                     use_container_width=True,
+#                     type="primary"
+#                 )
             
-            with col_print:
-                # JavaScript print button using HTML component
-                print_button_html = """
-                <style>
-                .print-btn {
-                    background-color: #262730;
-                    color: white;
-                    padding: 0.5rem 1rem;
-                    border: 1px solid rgba(250, 250, 250, 0.2);
-                    border-radius: 0.5rem;
-                    cursor: pointer;
-                    font-size: 1rem;
-                    width: 100%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    gap: 0.5rem;
-                    transition: background-color 0.2s, border-color 0.2s;
-                }
-                .print-btn:hover {
-                    background-color: #3d3d4d;
-                    border-color: rgba(250, 250, 250, 0.4);
-                }
-                </style>
-                <button class="print-btn" onclick="window.print()">
-                    🖨️ Print Page
-                </button>
-                """
-                st.components.v1.html(print_button_html, height=50)
+#             with col_print:
+#                 # JavaScript print button using HTML component
+#                 print_button_html = """
+#                 <style>
+#                 .print-btn {
+#                     background-color: #262730;
+#                     color: white;
+#                     padding: 0.5rem 1rem;
+#                     border: 1px solid rgba(250, 250, 250, 0.2);
+#                     border-radius: 0.5rem;
+#                     cursor: pointer;
+#                     font-size: 1rem;
+#                     width: 100%;
+#                     display: flex;
+#                     align-items: center;
+#                     justify-content: center;
+#                     gap: 0.5rem;
+#                     transition: background-color 0.2s, border-color 0.2s;
+#                 }
+#                 .print-btn:hover {
+#                     background-color: #3d3d4d;
+#                     border-color: rgba(250, 250, 250, 0.4);
+#                 }
+#                 </style>
+#                 <button class="print-btn" onclick="window.print()">
+#                     🖨️ Print Page
+#                 </button>
+#                 """
+#                 st.components.v1.html(print_button_html, height=50)
             
-            st.markdown("---")
+#             st.markdown("---")
             
-            # Auto-expanded preview
-            with st.expander("📄 Preview Conversation", expanded=True):
-                st.markdown(markdown_content)
+#             # Auto-expanded preview
+#             with st.expander("📄 Preview Conversation", expanded=True):
+#                 st.markdown(markdown_content)
             
-            st.caption("💡 **Tip:** Click 'Download PDF' to save the file, or 'Print Page' to print directly from your browser.")
-        else:
-            st.error("❌ Export failed. Please try again or contact support.")
+#             st.caption("💡 **Tip:** Click 'Download PDF' to save the file, or 'Print Page' to print directly from your browser.")
+#         else:
+#             st.error("❌ Export failed. Please try again or contact support.")
