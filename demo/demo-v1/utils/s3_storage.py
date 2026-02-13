@@ -342,6 +342,63 @@ def update_conversation_metadata(cognito_user_id: str, conversation_id: str, mes
         return False
 
 
+def update_conversation_title(cognito_user_id: str, conversation_id: str, title: str) -> bool:
+    """
+    Update the title of a conversation in the history index.
+
+    Args:
+        cognito_user_id: Cognito user ID (sub claim)
+        conversation_id: Conversation ID to rename
+        title: New title string
+
+    Returns:
+        True if successful, False otherwise
+    """
+    s3_client = get_s3_client()
+    if not s3_client:
+        return False
+
+    config = get_s3_config()
+    if not config:
+        return False
+
+    key = build_s3_path("users", cognito_user_id, "conversations.json")
+
+    try:
+        try:
+            response = s3_client.get_object(Bucket=config["bucket_name"], Key=key)
+            content = response['Body'].read().decode('utf-8')
+            conversations = json.loads(content)
+        except ClientError as e:
+            if e.response.get('Error', {}).get('Code', '') == 'NoSuchKey':
+                return False
+            else:
+                raise
+
+        updated = False
+        for conv in conversations:
+            if conv.get("conversation_id") == conversation_id:
+                conv["title"] = title
+                conv["last_updated"] = datetime.utcnow().isoformat() + "Z"
+                updated = True
+                break
+
+        if not updated:
+            return False
+
+        json_data = json.dumps(conversations, indent=2)
+        s3_client.put_object(
+            Bucket=config["bucket_name"],
+            Key=key,
+            Body=json_data.encode('utf-8'),
+            ContentType='application/json'
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error updating conversation title: {str(e)}")
+        return False
+
+
 # ============================================
 # Conversation Data Operations
 # ============================================
