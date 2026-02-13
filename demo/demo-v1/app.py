@@ -130,7 +130,7 @@ if st.session_state["student_info"] is None:
             
         first_name = st.text_input("First Name", key="first_name")
         last_name = st.text_input("Last Name", key="last_name")
-        college_year = st.selectbox("College Year", ["First Year", "Second Year", "Upper-Division", "Masters Student", "PhD Student"], key="college_year")
+        college_year = st.selectbox("College Year", ["First Year", "Second Year", "Upper-Division", "Masters Student", "PhD Student", "Faculty"], key="college_year")
         major = st.text_input("Major", key="major")
         course_number = st.text_input("Course Number", key="course_number")
         

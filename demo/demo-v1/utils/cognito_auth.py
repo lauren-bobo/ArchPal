@@ -203,7 +203,13 @@ def login():
 - When getting started, ask for a plan to help you manage a writing project.
 - Later on, ask for revision priorities and a checklist to guide your work.
 """)
-        
+        st.markdown("### Disclaimer")
+        st.markdown(
+            "ArchPal is a prototype. By using it, you understand responses may be imperfect "
+            "and the ArchPal team may review your prompts and ArchPal's replies to improve the tool. "
+            "Please don't enter sensitive personal information. If you have questions or need help "
+            "using ArchPal, reach out at archpalhelp@gmail.com."
+        )
         return False
         
     return True
