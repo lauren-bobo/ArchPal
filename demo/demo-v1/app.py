@@ -7,6 +7,10 @@ import uuid
 import os
 import time
 from datetime import datetime
+import json
+import logging
+from typing import Literal
+from pydantic import BaseModel, Field
 
 # Local imports
 from utils import cognito_auth, data_export, s3_storage
@@ -14,6 +18,99 @@ from utils import cognito_auth, data_export, s3_storage
 # Constants
 ICON_PATH = os.path.join(os.path.dirname(__file__), "figs", "icon.jpg")
 LOGO_PATH = os.path.join(os.path.dirname(__file__), "figs", "logo.png")
+EMOTIONS_PATH = os.path.join(os.path.dirname(__file__), "figs", "emotions")
+
+logger = logging.getLogger(__name__)
+
+# Structured response schema for LLM output
+VALID_EMOTIONS = Literal[
+    "default", "angry", "annoyed", "dance", "hello",
+    "point", "sad", "smile", "success", "upset", "walk"
+]
+
+
+class ArchPalResponse(BaseModel):
+    """Structured response from ArchPal with emotion and text."""
+
+    emotion: VALID_EMOTIONS = Field(
+        default="default",
+        description="The emotion that best matches ArchPal's tone in this response.",
+    )
+    response_text: str = Field(
+        description="The full response text to display to the student.",
+    )
+
+
+EMOTION_FILE_MAP = {
+    'default': 'default.png',
+    'angry': 'angry.png',
+    'annoyed': 'annoyed.png',
+    'dance': 'dance.png',
+    'hello': 'hello.png',
+    'point': 'point.png',
+    'sad': 'sad.png',
+    'smile': 'smile.png',
+    'success': 'success.png',
+    'upset': 'upset.png',
+    'walk': 'walk.png',
+}
+
+# Display size for emotion graphics (2x for retina sharpness)
+EMOTION_DISPLAY_WIDTH = 80
+EMOTION_RENDER_WIDTH = EMOTION_DISPLAY_WIDTH * 2
+
+
+def get_emotion_image_path(emotion_keyword):
+    emotion_file = EMOTION_FILE_MAP.get(emotion_keyword.lower(), 'default.png')
+    return os.path.join(EMOTIONS_PATH, emotion_file)
+
+
+@st.cache_data(show_spinner=False)
+def load_emotion_image(emotion_keyword):
+    """Load and resize an emotion image, cached across reruns.
+
+    Returns resized PNG bytes at 2x display resolution for retina sharpness,
+    or None if the file does not exist.
+    """
+    from PIL import Image
+    import io
+
+    file_path = get_emotion_image_path(emotion_keyword)
+    if not os.path.exists(file_path):
+        return None
+
+    with Image.open(file_path) as img:
+        aspect_ratio = img.height / img.width
+        target_height = int(EMOTION_RENDER_WIDTH * aspect_ratio)
+        resized = img.resize(
+            (EMOTION_RENDER_WIDTH, target_height),
+            Image.LANCZOS,
+        )
+        buffer = io.BytesIO()
+        resized.save(buffer, format="PNG", optimize=True)
+        return buffer.getvalue()
+
+def extract_emotion_from_response(ai_response):
+    """Backward-compatible extraction for historical messages stored before
+    structured output was adopted. New messages store clean text via
+    ArchPalResponse and do not need this function.
+
+    Returns:
+        tuple[str, str]: (emotion_keyword, clean_response_text)
+    """
+    try:
+        if '{' in ai_response and '}' in ai_response:
+            start = ai_response.find('{')
+            end = ai_response.rfind('}') + 1
+            json_str = ai_response[start:end]
+            data = json.loads(json_str)
+            emotion = data.get('emotion', 'default')
+            clean_response = ai_response[:start] + ai_response[end:]
+            return emotion.strip(), clean_response.strip()
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        logger.debug("Could not parse emotion JSON from historical message")
+
+    return 'default', ai_response
 
 # Cache for secrets to avoid repeated access
 _secrets_cache = None
@@ -156,6 +253,7 @@ Student Information:
 - Name: {first_name} {last_name}
 - College Year: {college_year}
 - Major: {major}
+
 """
 
 # Cache default system prompt in session state
@@ -166,15 +264,10 @@ if st.session_state["default_system_prompt"] is None:
 default_system_prompt_full = st.session_state["default_system_prompt"]
 
 
-
-
 # Main title
 col1, col2, col3 = st.columns([3, 2, 3])
 with col2:
     st.image(LOGO_PATH, width=100)
-# with col2:
-#     st.title("ArchPal: AI Writing Coach")
-#     st.caption("A small group of interdisciplinary UGA students and instructors are developing ArchPal: a new AI companion to help you plan, research, brainstorm, and create for any writing project! ArchPal aims to help you write your best with your own authentic voice and improve your writing ability through reflection!")
 
 st.divider()
 
@@ -228,21 +321,6 @@ with st.sidebar:
         if st.button("Logout", type="primary", use_container_width=True):
             cognito_auth.logout()
 
-    # export_clicked = st.button("📥 Export", key="top_export", type="secondary", use_container_width=True)
-    # if export_clicked:
-    #             if not st.session_state.message_log:
-    #                 st.warning("No conversation to export yet.")
-    #             else:
-    #                 # Use the utility function for export
-    #                 with st.spinner("📤 Generating your PDF..."):
-    #                     export_success = data_export.handle_export(
-    #                         st.session_state["student_info"],
-    #                         st.session_state["message_log"]
-    #                     )
-    #                 if export_success:
-    #                     st.session_state["show_export_results"] = True
-    #                     st.rerun()
-
     st.divider()
 
     #Export button
@@ -268,9 +346,6 @@ with st.sidebar:
             if export_success:
                 st.session_state["show_export_results"] = True
                 st.rerun()
-                # pdf_content = st.session_state.get("export_pdf", b"")
-                # pdf_filename = st.session_state.get("export_pdf_filename", "conversation.pdf")
-                # markdown_content = st.session_state.get("export_markdown", "")
             
             else:
                 st.error("❌ Export failed. Please try again or contact support.")
@@ -300,19 +375,21 @@ with st.sidebar:
             conv_id = conv.get("conversation_id")
             conv_title = conv.get("title", "Untitled Conversation")
             conv_date = conv.get("last_updated", conv.get("created_at", ""))
-            # Format date for display
+            # Format date for display (UTC)
             try:
                 if conv_date:
                     date_obj = datetime.fromisoformat(conv_date.replace("Z", "+00:00"))
-                    formatted_date = date_obj.strftime("%b %d, %Y %I:%M %p")
+                    formatted_date = date_obj.strftime("%b %d, %Y %I:%M %p") + " UTC"
                 else:
                     formatted_date = "Unknown date"
-            except:
+            except (ValueError, TypeError):
                 formatted_date = conv_date[:10] if conv_date else "Unknown"
+
+            is_active = st.session_state.get("current_conversation_id") == conv_id
             
-            # Create button for each conversation
+            # Load button
             button_label = f"{conv_title}\n{formatted_date}"
-            if st.button(button_label, key=f"conv_{conv_id}", use_container_width=True):
+            if st.button(button_label, key=f"conv_{conv_id}", use_container_width=True, type="primary" if is_active else "secondary"):
                 # Load conversation
                 conversation_data = s3_storage.get_conversation(cognito_user_id, conv_id)
                 if conversation_data:
@@ -340,28 +417,31 @@ with st.sidebar:
                                         "AIMessageTime": ai_msg.get("timestamp", "")
                                     })
                         elif role == "assistant":
-                            st.session_state["messages"].append(AIMessage(content=content))
+                            stored_emotion = msg.get("metadata", {}).get("emotion", "default")
+                            st.session_state["messages"].append(
+                                AIMessage(
+                                    content=content,
+                                    additional_kwargs={"emotion": stored_emotion},
+                                )
+                            )
                     
                     st.rerun()
+
+            # Rename control for the active conversation
+            if is_active:
+                new_title = st.text_input(
+                    "Rename",
+                    value=conv_title,
+                    key=f"rename_{conv_id}",
+                    label_visibility="collapsed",
+                    placeholder="Enter conversation name",
+                )
+                if new_title != conv_title:
+                    if s3_storage.update_conversation_title(cognito_user_id, conv_id, new_title):
+                        st.session_state["conversation_history"] = s3_storage.get_conversation_history(cognito_user_id, limit=5)
+                        st.rerun()
     else:
         st.info("No previous conversations. Start chatting to create your first conversation!")
-    
-    # New Conversation button
-    # if st.button("➕ New Conversation", use_container_width=True, type="primary"):
-    #     st.session_state["messages"] = []
-    #     st.session_state["message_log"] = []
-    #     st.session_state["current_conversation_id"] = None
-    #     # Refresh conversation history from S3
-    #     if cognito_user_id:
-    #         st.session_state["conversation_history"] = s3_storage.get_conversation_history(cognito_user_id, limit=5)
-    #     st.rerun()
-    
-    # st.divider()
-    
-    # st.markdown("### 📋 Instructions")
-    # st.markdown("1. **Chat with ArchPal**: Type and send your message to get started.")
-    # st.markdown("2. **Resume conversations**: Click on any conversation above to continue.")
-    # st.markdown("3. **Export data**: Use the export button below to download your conversation data.")
 
 # Display chat messages
 if "messages" in st.session_state:
@@ -369,8 +449,22 @@ if "messages" in st.session_state:
         if isinstance(message, HumanMessage):
             st.chat_message("user").write(message.content)
         elif isinstance(message, AIMessage):
-            st.chat_message("assistant", avatar=ICON_PATH).write(message.content)
-
+            # Read emotion from additional_kwargs (new format) or
+            # fall back to legacy JSON extraction for old messages
+            stored_emotion = message.additional_kwargs.get("emotion")
+            if stored_emotion:
+                emotion = stored_emotion
+                clean_content = message.content
+            else:
+                emotion, clean_content = extract_emotion_from_response(message.content)
+            with st.chat_message("assistant", avatar=ICON_PATH):
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.write(clean_content)
+                with col2:
+                    emotion_img_bytes = load_emotion_image(emotion)
+                    if emotion_img_bytes:
+                        st.image(emotion_img_bytes, width=EMOTION_DISPLAY_WIDTH)
 # Chat input
 if prompt := st.chat_input():
     # Verify AWS credentials are configured
@@ -439,11 +533,29 @@ if prompt := st.chat_input():
     langchain_messages = [SystemMessage(content=system_prompt)]
     langchain_messages.extend(st.session_state.messages)
 
-    # Get response from Claude
+    # Get response from Claude using structured output
+    structured_chat = chat.with_structured_output(ArchPalResponse)
+
     try:
         with st.spinner("ArchPal is thinking..."):
-            response = chat.invoke(langchain_messages)
-        ai_message = AIMessage(content=response.content)
+            try:
+                structured_response = structured_chat.invoke(langchain_messages)
+                emotion = structured_response.emotion
+                clean_text = structured_response.response_text
+            except Exception as structured_error:
+                logger.warning(
+                    "Structured output failed, falling back to unstructured: %s",
+                    structured_error,
+                )
+                raw_response = chat.invoke(langchain_messages)
+                emotion = "default"
+                clean_text = raw_response.content
+
+        # Store clean text with emotion in additional_kwargs for display
+        ai_message = AIMessage(
+            content=clean_text,
+            additional_kwargs={"emotion": emotion},
+        )
         st.session_state.messages.append(ai_message)
 
         # Step 2: Save conversation pair to log with timestamps
@@ -451,7 +563,7 @@ if prompt := st.chat_input():
         st.session_state.message_log.append({
             "userMessage": prompt,
             "userMessageTime": user_timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-            "AIMessage": response.content,
+            "AIMessage": clean_text,
             "AIMessageTime": ai_timestamp.strftime("%Y-%m-%d %H:%M:%S")
         })
 
@@ -463,8 +575,8 @@ if prompt := st.chat_input():
                 conversation_id = str(uuid.uuid4())
                 st.session_state["current_conversation_id"] = conversation_id
                 
-                # Use current time for conversation title
-                conv_title = datetime.now().strftime("%b %d, %Y %I:%M %p")
+                # Default title: UTC timestamp
+                conv_title = datetime.utcnow().strftime("%b %d, %Y %I:%M %p") + " UTC"
                 
                 # Add to conversation history
                 s3_storage.add_conversation_to_history(cognito_user_id, conversation_id, title=conv_title)
@@ -480,15 +592,16 @@ if prompt := st.chat_input():
                 metadata={"course_number": course_number}
             )
             
-            # Append AI message
+            # Append AI message with clean text and emotion metadata
             s3_storage.append_message_to_conversation(
                 cognito_user_id,
                 conversation_id,
                 "assistant",
-                response.content,
+                clean_text,
                 metadata={
                     "model": secrets.get("anthropic_model", "unknown"),
-                    "course_number": course_number
+                    "course_number": course_number,
+                    "emotion": emotion,
                 }
             )
             
@@ -506,7 +619,16 @@ if prompt := st.chat_input():
                 }
                 s3_storage.save_conversation(cognito_user_id, conversation_id, conversation_data)
 
-        st.chat_message("assistant", avatar=ICON_PATH).write(response.content)
+        # Display AI response with emotion graphic
+        with st.chat_message("assistant", avatar=ICON_PATH):
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.write(clean_text)
+            with col2:
+                emotion_img_bytes = load_emotion_image(emotion)
+                if emotion_img_bytes:
+                    st.image(emotion_img_bytes, width=EMOTION_DISPLAY_WIDTH)
+
     except Exception as e:
         st.error(f"Error: {str(e)}")
         st.stop()
@@ -524,7 +646,6 @@ if st.session_state.get("show_export_results", False):
     st.info(f"📁 **File:** `{pdf_filename}`")
     
     # Download and Print buttons side by side
-    # col_download, col_print, col_close = st.columns([2, 2, 1])
     col_download, col_close = st.columns([2, 2])
 
     with col_download:
@@ -536,36 +657,6 @@ if st.session_state.get("show_export_results", False):
             use_container_width=True,
             type="primary"
         )
-    
-    # with col_print:
-    #     # JavaScript print button using HTML component
-    #     print_button_html = """
-    #     <style>
-    #     .print-btn {
-    #         background-color: #262730;
-    #         color: white;
-    #         padding: 0.5rem 1rem;
-    #         border: 1px solid rgba(250, 250, 250, 0.2);
-    #         border-radius: 0.5rem;
-    #         cursor: pointer;
-    #         font-size: 1rem;
-    #         width: 100%;
-    #         display: flex;
-    #         align-items: center;
-    #         justify-content: center;
-    #         gap: 0.5rem;
-    #         transition: background-color 0.2s, border-color 0.2s;
-    #     }
-    #     .print-btn:hover {
-    #         background-color: #3d3d4d;
-    #         border-color: rgba(250, 250, 250, 0.4);
-    #     }
-    #     </style>
-    #     <button class="print-btn" onclick="window.print()">
-    #         🖨️ Print Page
-    #     </button>
-    #     """
-    #     st.components.v1.html(print_button_html, height=50)
     
     with col_close:
         if st.button("✖️ Close", key="close_export", use_container_width=True):
@@ -579,89 +670,3 @@ if st.session_state.get("show_export_results", False):
         st.markdown(markdown_content)
     
     st.caption("💡 **Tip:** Click 'Download PDF' to save the file.")
-    
-# Step 3: Export button
-# st.divider()
-# col_export1, col_export2 = st.columns([3, 1])
-
-# with col_export1:
-#     st.markdown("### 📄 Export Conversation")
-#     st.caption("Download your conversation as a PDF or print it directly")
-
-# with col_export2:
-#     export_clicked = st.button("📥 Export & Print", use_container_width=True, type="primary")
-
-# if export_clicked:
-#     if not st.session_state.message_log:
-#         st.warning("No conversation to export yet.")
-#     else:
-#         # Show loading spinner during export
-#         with st.spinner("📤 Generating your PDF..."):
-#             # Use the utility function for export
-#             export_success = data_export.handle_export(
-#                 st.session_state["student_info"],
-#                 st.session_state["message_log"]
-#             )
-
-#         # Show result message and download options
-#         if export_success:
-#             pdf_content = st.session_state.get("export_pdf", b"")
-#             pdf_filename = st.session_state.get("export_pdf_filename", "conversation.pdf")
-#             markdown_content = st.session_state.get("export_markdown", "")
-            
-#             # Success message with file info
-#             st.success(f"✅ Your conversation is ready!")
-#             st.info(f"📁 **File:** `{pdf_filename}`")
-            
-#             # Download and Print buttons side by side
-#             col_download, col_print = st.columns(2)
-            
-#             with col_download:
-#                 st.download_button(
-#                     label="⬇️ Download PDF",
-#                     data=pdf_content,
-#                     file_name=pdf_filename,
-#                     mime="application/pdf",
-#                     use_container_width=True,
-#                     type="primary"
-#                 )
-            
-#             with col_print:
-#                 # JavaScript print button using HTML component
-#                 print_button_html = """
-#                 <style>
-#                 .print-btn {
-#                     background-color: #262730;
-#                     color: white;
-#                     padding: 0.5rem 1rem;
-#                     border: 1px solid rgba(250, 250, 250, 0.2);
-#                     border-radius: 0.5rem;
-#                     cursor: pointer;
-#                     font-size: 1rem;
-#                     width: 100%;
-#                     display: flex;
-#                     align-items: center;
-#                     justify-content: center;
-#                     gap: 0.5rem;
-#                     transition: background-color 0.2s, border-color 0.2s;
-#                 }
-#                 .print-btn:hover {
-#                     background-color: #3d3d4d;
-#                     border-color: rgba(250, 250, 250, 0.4);
-#                 }
-#                 </style>
-#                 <button class="print-btn" onclick="window.print()">
-#                     🖨️ Print Page
-#                 </button>
-#                 """
-#                 st.components.v1.html(print_button_html, height=50)
-            
-#             st.markdown("---")
-            
-#             # Auto-expanded preview
-#             with st.expander("📄 Preview Conversation", expanded=True):
-#                 st.markdown(markdown_content)
-            
-#             st.caption("💡 **Tip:** Click 'Download PDF' to save the file, or 'Print Page' to print directly from your browser.")
-#         else:
-#             st.error("❌ Export failed. Please try again or contact support.")
